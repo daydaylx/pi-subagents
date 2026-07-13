@@ -15,6 +15,7 @@ interface AsyncJobTrackerModule {
 			resultsDir?: string;
 			kill?: (pid: number, signal?: NodeJS.Signals | 0) => boolean;
 			now?: () => number;
+			showAsyncWidget?: boolean;
 		},
 	): {
 		ensurePoller(): void;
@@ -107,6 +108,29 @@ function createUiContext() {
 }
 
 describe("async job tracker", { skip: !available ? "pi packages not available" : undefined }, () => {
+	it("keeps lifecycle tracking active when the async widget is disabled", async () => {
+		const asyncRoot = createTempDir("pi-async-job-tracker-no-widget-");
+		try {
+			const state = createState();
+			const ui = createUiContext();
+			const tracker = trackerMod!.createAsyncJobTracker(createEventRecorder().pi, state as never, asyncRoot, {
+				completionRetentionMs: 5,
+				showAsyncWidget: false,
+			});
+			tracker.resetJobs(ui.ctx as never);
+			tracker.handleStarted({ id: "run-no-widget", asyncDir: path.join(asyncRoot, "run-no-widget"), agent: "worker" });
+			tracker.handleComplete({ id: "run-no-widget", success: true });
+
+			assert.equal(state.asyncJobs.size, 1, "disabling the widget must not disable async lifecycle state");
+			await new Promise((resolve) => setTimeout(resolve, 40));
+			assert.equal(state.asyncJobs.size, 0, "completion cleanup still runs without a widget");
+			assert.equal(ui.widgets.length, 0, "no editor widget is installed when disabled");
+			assert.equal(ui.renderRequests, 0, "the hidden widget does not request redraws");
+		} finally {
+			removeTempDir(asyncRoot);
+		}
+	});
+
 	it("removes completed jobs after retention and requests a rerender", async () => {
 		const asyncRoot = createTempDir("pi-async-job-tracker-");
 		try {

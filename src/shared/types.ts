@@ -1024,6 +1024,16 @@ export interface ScheduledRunsConfig {
 	maxPending?: number;
 }
 
+/** Presentation controls for the interactive parent session. */
+export interface SubagentUiConfig {
+	/**
+	 * Show the asynchronous-job widget above the editor. Defaults to true for
+	 * backwards compatibility; hosts that render a compact tool timeline can
+	 * turn it off to keep each tool to one visible history trace.
+	 */
+	showAsyncWidget?: boolean;
+}
+
 export interface ExtensionConfig {
 	asyncByDefault?: boolean;
 	/** Tool description variant registered for the parent-facing subagent tool. Defaults to full. */
@@ -1048,6 +1058,7 @@ export interface ExtensionConfig {
 	intercomBridge?: IntercomBridgeConfig;
 	proactiveSkillSubagents?: ProactiveSkillSubagentsConfig | false;
 	scheduledRuns?: ScheduledRunsConfig;
+	ui?: SubagentUiConfig;
 }
 
 // ============================================================================
