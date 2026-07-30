@@ -10,6 +10,7 @@ import {
 	type AsyncJobStep,
 	type AsyncStatus,
 	type Details,
+	type ForegroundControlState,
 	type NestedRunSummary,
 	type SubagentRunMode,
 	type SubagentState,
@@ -22,7 +23,7 @@ const DEFAULT_TRANSCRIPT_LINES = 80;
 const MAX_TRANSCRIPT_LINES = 500;
 const TRANSCRIPT_TAIL_BYTES = 256 * 1024;
 
-type ForegroundControl = SubagentState["foregroundControls"] extends Map<string, infer T> ? T : never;
+type ForegroundControl = ForegroundControlState;
 type ForegroundRun = NonNullable<SubagentState["foregroundRuns"]> extends Map<string, infer T> ? T : never;
 
 interface FleetViewParams {
