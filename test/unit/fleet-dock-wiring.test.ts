@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { describe, it } from "node:test";
-import type { ExtensionConfig, SubagentState } from "../../src/shared/types.ts";
-import { FLEET_DOCK_WIDGET_KEY, WIDGET_KEY } from "../../src/shared/types.ts";
+import type { AsyncJobState, ExtensionConfig, ForegroundControlState, SubagentState } from "../../src/shared/types.ts";
+import { FLEET_DOCK_WIDGET_KEY, FLEET_INSPECTOR_WIDGET_KEY, WIDGET_KEY } from "../../src/shared/types.ts";
 import { createFleetDockWiring } from "../../src/runs/background/fleet-dock-wiring.ts";
 import { createAsyncJobTracker } from "../../src/runs/background/async-job-tracker.ts";
+import { getProjectArtifactsDir } from "../../src/shared/artifacts.ts";
 
 function makeState(overrides: Partial<SubagentState> = {}): SubagentState {
 	return {
@@ -23,11 +27,37 @@ function makeState(overrides: Partial<SubagentState> = {}): SubagentState {
 	} as SubagentState;
 }
 
+function makeForegroundControl(overrides: Partial<ForegroundControlState> = {}): ForegroundControlState {
+	return {
+		runId: "run-1",
+		mode: "single",
+		startedAt: 0,
+		updatedAt: 0,
+		currentAgent: "worker-x",
+		...overrides,
+	} as ForegroundControlState;
+}
+
+function makeAsyncJobState(overrides: Partial<AsyncJobState> = {}): AsyncJobState {
+	return {
+		asyncId: "async-1",
+		asyncDir: "/tmp/async-1",
+		status: "running",
+		...overrides,
+	} as AsyncJobState;
+}
+
+const ESC = "\u001b";
+const UP = "\u001b[A";
+const DOWN = "\u001b[B";
+const RETURN = "\r";
+
 interface FakeUi {
 	setWidgetCalls: Array<{ key: string; content: unknown; opts: unknown }>;
 	terminalInputSubscriptions: number;
 	terminalInputUnsubscribed: number;
 	requestRenderCalls: number;
+	terminalInputHandler?: (data: string) => { consume?: boolean; data?: string } | undefined;
 }
 
 function makeCtx(overrides: { hasUI?: boolean } = {}) {
@@ -39,12 +69,17 @@ function makeCtx(overrides: { hasUI?: boolean } = {}) {
 	};
 	const ctx = {
 		hasUI: overrides.hasUI ?? true,
+		sessionManager: {
+			getSessionFile: () => null,
+			getSessionId: () => "session-test",
+		},
 		ui: {
 			setWidget(key: string, content: unknown, opts?: unknown) {
 				fake.setWidgetCalls.push({ key, content, opts });
 			},
-			onTerminalInput(_handler: (data: string) => unknown) {
+			onTerminalInput(handler: (data: string) => { consume?: boolean; data?: string } | undefined) {
 				fake.terminalInputSubscriptions += 1;
+				fake.terminalInputHandler = handler;
 				return () => {
 					fake.terminalInputUnsubscribed += 1;
 				};
@@ -53,9 +88,20 @@ function makeCtx(overrides: { hasUI?: boolean } = {}) {
 			requestRender: () => {
 				fake.requestRenderCalls += 1;
 			},
+			theme: { fg: (_n: string, t: string) => t, bg: (_n: string, t: string) => t, bold: (t: string) => t },
 		},
 	};
 	return { ctx, fake };
+}
+
+function renderWidget(fake: FakeUi, key: string): string[] {
+	const call = [...fake.setWidgetCalls].reverse().find((c) => c.key === key);
+	if (!call || typeof call.content !== "function") return [];
+	const component = (call.content as (tui: unknown, theme: unknown) => { render(width: number): string[] })(
+		{},
+		{ fg: (_n: string, t: string) => t, bg: (_n: string, t: string) => t, bold: (t: string) => t },
+	);
+	return component.render(80);
 }
 
 describe("createFleetDockWiring - disabled", () => {
@@ -235,6 +281,17 @@ describe("createFleetDockWiring - enabled", () => {
 		assert.equal(fake.terminalInputUnsubscribed, 1);
 	});
 
+	it("dispose() also clears the fleet inspector widget", () => {
+		const { ctx, fake } = makeCtx();
+		const state = makeState({ lastUiContext: ctx as never });
+		const wiring = createFleetDockWiring(state, config());
+		wiring.onSessionStart(ctx as never);
+		wiring.dispose();
+
+		const inspectorCalls = fake.setWidgetCalls.filter((c) => c.key === FLEET_INSPECTOR_WIDGET_KEY);
+		assert.equal(inspectorCalls.at(-1)!.content, undefined);
+	});
+
 	it("dispose() is a no-op when there is no lastUiContext", () => {
 		const wiring = createFleetDockWiring(makeState({ lastUiContext: null }), config());
 		assert.doesNotThrow(() => wiring.dispose());
@@ -266,5 +323,118 @@ describe("createFleetDockWiring - enabled", () => {
 		const state = makeState({ lastUiContext: ctx as never });
 		const wiring = createFleetDockWiring(state, config());
 		assert.throws(() => wiring.dispose(), /boom/);
+	});
+});
+
+describe("createFleetDockWiring - inspector (PHASE-05)", () => {
+	function config(overrides: Record<string, unknown> = {}): ExtensionConfig {
+		return { ui: { fleetView: true, ...overrides } } as ExtensionConfig;
+	}
+
+	it("registers the fleet inspector widget alongside the dock widget", () => {
+		const wiring = createFleetDockWiring(makeState(), config());
+		const { ctx, fake } = makeCtx();
+		wiring.onSessionStart(ctx as never);
+
+		const inspectorCall = fake.setWidgetCalls.find((c) => c.key === FLEET_INSPECTOR_WIDGET_KEY);
+		assert.ok(inspectorCall, "expected the fleet inspector widget to be registered");
+		assert.equal(typeof inspectorCall!.content, "function");
+		assert.deepEqual(inspectorCall!.opts, { placement: "belowEditor" });
+	});
+
+	it("renders no inspector content until it is opened", () => {
+		const wiring = createFleetDockWiring(makeState(), config());
+		const { ctx, fake } = makeCtx();
+		wiring.onSessionStart(ctx as never);
+		assert.deepEqual(renderWidget(fake, FLEET_INSPECTOR_WIDGET_KEY), []);
+	});
+
+	it("Enter opens the inspector for the selected entry and renders its content", () => {
+		const state = makeState({ foregroundControls: new Map([["run-1", makeForegroundControl({ runId: "run-1", currentAgent: "worker-x" })]]) });
+		const wiring = createFleetDockWiring(state, config());
+		const { ctx, fake } = makeCtx();
+		wiring.onSessionStart(ctx as never);
+
+		fake.terminalInputHandler!(DOWN); // activate dock, select first entry
+		const enterResult = fake.terminalInputHandler!(RETURN); // open inspector instead of toggling inline detail
+		assert.equal(enterResult?.consume, true);
+
+		const lines = renderWidget(fake, FLEET_INSPECTOR_WIDGET_KEY);
+		assert.ok(lines.some((line) => line.includes("worker-x")));
+	});
+
+	it("first Escape closes only the inspector; the dock stays active and keeps consuming arrow keys", () => {
+		const state = makeState({ foregroundControls: new Map([["run-1", makeForegroundControl({ runId: "run-1" })]]) });
+		const wiring = createFleetDockWiring(state, config());
+		const { ctx, fake } = makeCtx();
+		wiring.onSessionStart(ctx as never);
+
+		fake.terminalInputHandler!(DOWN);
+		fake.terminalInputHandler!(RETURN);
+		assert.ok(renderWidget(fake, FLEET_INSPECTOR_WIDGET_KEY).length > 0, "inspector should show content once opened");
+
+		const firstEscape = fake.terminalInputHandler!(ESC);
+		assert.equal(firstEscape?.consume, true);
+		assert.deepEqual(renderWidget(fake, FLEET_INSPECTOR_WIDGET_KEY), [], "inspector widget should be empty again after closing");
+
+		// The dock must still be active: UP is only consumed while FleetDockController is active.
+		const upAfterFirstEscape = fake.terminalInputHandler!(UP);
+		assert.equal(upAfterFirstEscape?.consume, true, "dock should still be active and consuming navigation keys");
+	});
+
+	it("second Escape (after the inspector is already closed) deactivates the dock", () => {
+		const state = makeState({ foregroundControls: new Map([["run-1", makeForegroundControl({ runId: "run-1" })]]) });
+		const wiring = createFleetDockWiring(state, config());
+		const { ctx, fake } = makeCtx();
+		wiring.onSessionStart(ctx as never);
+
+		fake.terminalInputHandler!(DOWN);
+		fake.terminalInputHandler!(RETURN);
+		fake.terminalInputHandler!(ESC); // closes the inspector only
+
+		const secondEscape = fake.terminalInputHandler!(ESC);
+		assert.equal(secondEscape?.consume, true);
+
+		// The dock is now inactive: UP is no longer a recognized activation key, so it must not be consumed.
+		const upAfterSecondEscape = fake.terminalInputHandler!(UP);
+		assert.equal(upAfterSecondEscape, undefined, "dock should be deactivated, so UP is no longer consumed");
+	});
+
+	it("onToolResult invalidates the inspector's transcript cache, forcing a re-read of a real transcript file", () => {
+		const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-fleet-dock-wiring-inspector-"));
+		try {
+			const artifactsDir = getProjectArtifactsDir(projectDir);
+			fs.mkdirSync(artifactsDir, { recursive: true });
+			const transcriptPath = path.join(artifactsDir, "async-1_worker-a_0_transcript.jsonl");
+			fs.writeFileSync(transcriptPath, `${JSON.stringify({ recordType: "message", ts: 1, role: "user", text: "first" })}\n`, "utf-8");
+
+			const job = makeAsyncJobState({
+				status: "running",
+				steps: [{ index: 0, agent: "worker-a", status: "running", transcriptPath }],
+			});
+			const state = makeState({ baseCwd: projectDir, asyncJobs: new Map([["async-1", job]]) });
+			const wiring = createFleetDockWiring(state, config());
+			const { ctx, fake } = makeCtx();
+			state.lastUiContext = ctx as never;
+			wiring.onSessionStart(ctx as never);
+
+			// buildFleetEntries() returns [parentEntry, stepEntry] in that (unsorted)
+			// order; the first DOWN activates the dock and selects the parent (index
+			// 0, no transcriptPath), the second DOWN moves to the child step, which
+			// carries the transcriptPath.
+			fake.terminalInputHandler!(DOWN);
+			fake.terminalInputHandler!(DOWN);
+			fake.terminalInputHandler!(RETURN);
+			const firstRender = renderWidget(fake, FLEET_INSPECTOR_WIDGET_KEY);
+			assert.ok(firstRender.some((line) => line.includes("first")), "expected the initial transcript content to render");
+
+			fs.appendFileSync(transcriptPath, `${JSON.stringify({ recordType: "message", ts: 2, role: "user", text: "second" })}\n`, "utf-8");
+			wiring.onToolResult(ctx as never);
+
+			const secondRender = renderWidget(fake, FLEET_INSPECTOR_WIDGET_KEY);
+			assert.ok(secondRender.some((line) => line.includes("second")), "expected onToolResult to invalidate the cache and pick up the appended line");
+		} finally {
+			fs.rmSync(projectDir, { recursive: true, force: true });
+		}
 	});
 });

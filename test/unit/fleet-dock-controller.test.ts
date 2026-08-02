@@ -232,3 +232,38 @@ describe("FleetDockController keyboard focus", () => {
 		assert.equal(result, undefined);
 	});
 });
+
+describe("FleetDockController onOpenInspector", () => {
+	function stateWithTwoEntries() {
+		return makeState({
+			foregroundControls: new Map([
+				["run-1", makeForegroundControl({ runId: "run-1" })],
+				["run-2", makeForegroundControl({ runId: "run-2", currentAgent: "helper" })],
+			]),
+		});
+	}
+
+	it("calls onOpenInspector with the selected key on return instead of toggling the inline detail line", () => {
+		let openedKey: string | undefined;
+		const controller = createFleetDockController(stateWithTwoEntries(), {
+			...NO_ASYNC_DEPS,
+			onOpenInspector: (key) => {
+				openedKey = key;
+			},
+		});
+		controller.handleTerminalInput(emptyEditor(), "\u001b[B"); // activate, select first
+		const firstKey = controller.getSelectedKey();
+		const result = controller.handleTerminalInput(emptyEditor(), "\r");
+		assert.equal(result?.consume, true);
+		assert.equal(openedKey, firstKey);
+		assert.equal(controller.getExpandedKey(), undefined);
+	});
+
+	it("falls back to toggleExpanded() when onOpenInspector is not provided (PHASE-04 behavior unchanged)", () => {
+		const controller = createFleetDockController(stateWithTwoEntries(), NO_ASYNC_DEPS);
+		controller.handleTerminalInput(emptyEditor(), "\u001b[B");
+		const firstKey = controller.getSelectedKey();
+		controller.handleTerminalInput(emptyEditor(), "\r");
+		assert.equal(controller.getExpandedKey(), firstKey);
+	});
+});

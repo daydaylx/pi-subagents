@@ -54,6 +54,13 @@
  * KNOWN GAP 5: Abgeschlossene/detachte Foreground-Runs (ForegroundResumeRun)
  * fuehren keine nestedChildren mehr - die Nested-Projektion existiert nur auf
  * lebenden foregroundControls-/AsyncJobState-Eintraegen.
+ *
+ * KNOWN GAP 6 (PHASE-05): model/thinking existieren strukturell nur auf
+ * AsyncJobStep/AsyncRunStepSummary (Async-Steps). Weder der anonyme
+ * foregroundControls-Wert noch ForegroundResumeChild/NestedStepSummary
+ * fuehren diese Felder - Foreground- und Nested-Eintraege lassen model/
+ * thinking daher immer undefined, auch wenn der zugrundeliegende Agent
+ * tatsaechlich mit einem bestimmten Modell laeuft.
  */
 
 import { shortenPath } from "../../shared/formatters.ts";
@@ -103,6 +110,8 @@ export interface FleetAgentEntry {
 	agent: string;
 	description?: string;
 	mode?: SubagentRunMode;
+	model?: string;
+	thinking?: string;
 
 	state: FleetAgentState;
 	needsAttention: boolean;
@@ -380,6 +389,8 @@ interface AsyncStepInput {
 	lastActivityAt?: number;
 	transcriptPath?: string;
 	transcriptPathMaybeStale?: boolean;
+	model?: string;
+	thinking?: string;
 	now: number;
 }
 
@@ -427,6 +438,8 @@ function normalizeAsyncStep(input: AsyncStepInput): FleetAgentEntry {
 		turnCount: input.turnCount,
 		transcriptPath: input.transcriptPath,
 		transcriptPathMaybeStale: input.transcriptPathMaybeStale,
+		model: input.model,
+		thinking: input.thinking,
 	};
 }
 
@@ -505,6 +518,8 @@ export function normalizeAsyncJobState(job: AsyncJobState, ctx: AsyncActiveConte
 			lastActivityAt: step.lastActivityAt,
 			transcriptPath: step.transcriptPath,
 			transcriptPathMaybeStale: false,
+			model: step.model,
+			thinking: step.thinking,
 			now: ctx.now,
 		}),
 	);
@@ -580,6 +595,8 @@ export function normalizeAsyncRunSummary(run: AsyncRunSummary, ctx: { now: numbe
 			lastActivityAt: step.lastActivityAt,
 			transcriptPath: undefined, // KNOWN GAP 3
 			transcriptPathMaybeStale: terminal,
+			model: step.model,
+			thinking: step.thinking,
 			now: ctx.now,
 		}),
 	);

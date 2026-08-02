@@ -44,6 +44,11 @@ export interface FleetDockControllerOptions {
 	refreshIntervalMs?: number;
 	maxRows?: number;
 	deps?: BuildFleetEntriesDeps;
+	// PHASE-05: wenn gesetzt, oeffnet Enter (bei vorhandener Selektion) den
+	// Inspector statt der inline toggleExpanded()-Detailzeile. Optional und
+	// rueckwaertskompatibel - ohne diese Option (z.B. in bestehenden Tests)
+	// bleibt das PHASE-04-Verhalten unveraendert.
+	onOpenInspector?: (key: string) => void;
 }
 
 export class FleetDockController {
@@ -183,7 +188,11 @@ export class FleetDockController {
 			return { consume: true };
 		}
 		if (matchesKey(data, "return")) {
-			this.toggleExpanded();
+			if (this.options.onOpenInspector && this.selectedKey !== undefined) {
+				this.options.onOpenInspector(this.selectedKey);
+			} else {
+				this.toggleExpanded();
+			}
 			return { consume: true };
 		}
 		return undefined;

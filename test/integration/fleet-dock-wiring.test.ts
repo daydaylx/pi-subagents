@@ -153,4 +153,34 @@ describe("fleet dock wiring", () => {
 		`;
 		runScript(script, agentDir);
 	});
+
+	it("registers the fleet inspector widget through the real extension (PHASE-05)", () => {
+		const agentDir = makeAgentDir({ fleetView: true });
+		const script = `${HARNESS}
+			registerSubagentExtension(fakePi());
+			const ctx = makeCtx();
+			latest("session_start")({}, ctx);
+
+			const inspectorCall = lastCallFor("subagent-fleet-inspector");
+			if (!inspectorCall) throw new Error("expected subagent-fleet-inspector widget to be registered");
+			if (typeof inspectorCall.content !== "function") throw new Error("expected fleet inspector widget content to be a factory function");
+			if (inspectorCall.opts?.placement !== "belowEditor") throw new Error("expected default placement belowEditor, got " + JSON.stringify(inspectorCall.opts));
+			// Still exactly 1 shared terminal input subscription - the inspector
+			// does not register a second onTerminalInput handler of its own.
+			if (liveSubscriptions.size !== 1) throw new Error("expected exactly 1 terminal input subscription, got " + liveSubscriptions.size);
+		`;
+		runScript(script, agentDir);
+	});
+
+	it("does not register the fleet inspector widget when fleetView is disabled", () => {
+		const agentDir = makeAgentDir({});
+		const script = `${HARNESS}
+			registerSubagentExtension(fakePi());
+			const ctx = makeCtx();
+			latest("session_start")({}, ctx);
+
+			if (lastCallFor("subagent-fleet-inspector")) throw new Error("did not expect the fleet inspector widget to be registered when fleetView is off");
+		`;
+		runScript(script, agentDir);
+	});
 });

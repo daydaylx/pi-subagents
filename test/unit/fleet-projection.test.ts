@@ -420,6 +420,15 @@ describe("normalizeAsyncJobState", () => {
 		assert.equal(entries[1]?.parentKey, "async:async-1");
 	});
 
+	it("carries model/thinking through from a live async step", () => {
+		const job = makeAsyncJobState({
+			steps: [{ index: 0, agent: "worker-a", status: "running", model: "claude-sonnet-5", thinking: "high" }],
+		});
+		const entries = normalizeAsyncJobState(job, { pending: [], now: 1000 });
+		assert.equal(entries[1]?.model, "claude-sonnet-5");
+		assert.equal(entries[1]?.thinking, "high");
+	});
+
 	it("never marks transcriptPathMaybeStale for entries sourced from the live in-memory map", () => {
 		const job = makeAsyncJobState({
 			status: "complete",
@@ -465,6 +474,38 @@ describe("normalizeAsyncRunSummary", () => {
 		const run = makeAsyncRunSummary({ state: "running", steps: [{ index: 0, agent: "worker-a", status: "running" }] });
 		const [entry] = normalizeAsyncRunSummary(run, { now: 1000 });
 		assert.equal(entry.kind, "active");
+	});
+});
+
+describe("normalizeAsyncRunSummary model/thinking", () => {
+	it("carries model/thinking through from a disk-projected step", () => {
+		const run = makeAsyncRunSummary({
+			steps: [{ index: 0, agent: "worker-a", status: "completed", model: "gpt-5.5", thinking: "medium" }],
+		});
+		const entries = normalizeAsyncRunSummary(run, { now: 1000 });
+		assert.equal(entries[1]?.model, "gpt-5.5");
+		assert.equal(entries[1]?.thinking, "medium");
+	});
+});
+
+describe("KNOWN GAP 6: model/thinking are undefined outside async steps", () => {
+	it("leaves model/thinking undefined on foreground active entries", () => {
+		const control = makeForegroundControl({ mode: "single", currentAgent: "reviewer" });
+		const entry = normalizeForegroundActive(control, { pending: [], now: 1000 });
+		assert.equal(entry.model, undefined);
+		assert.equal(entry.thinking, undefined);
+	});
+
+	it("leaves model/thinking undefined on nested run/step entries", () => {
+		const run = makeNestedRunSummary({
+			state: "running",
+			steps: [{ agent: "worker-a", status: "running" }],
+		});
+		const entries = normalizeNestedRun(run, "foreground:active:run-1", 1, { now: 1000, source: "foreground", rootRunId: "run-1" });
+		for (const entry of entries) {
+			assert.equal(entry.model, undefined);
+			assert.equal(entry.thinking, undefined);
+		}
 	});
 });
 

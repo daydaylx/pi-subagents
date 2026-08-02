@@ -35,7 +35,7 @@ export function sortFleetEntries(entries: FleetAgentEntry[]): FleetAgentEntry[] 
 	});
 }
 
-function stateGlyph(state: FleetAgentState, theme: Theme): string {
+export function stateGlyph(state: FleetAgentState, theme: Theme): string {
 	if (state === "needs_attention") return theme.fg("warning", "⚠");
 	if (state === "running") return theme.fg("accent", "●");
 	if (state === "paused") return theme.fg("warning", "■");
@@ -55,7 +55,7 @@ function entryStats(entry: FleetAgentEntry, now: number, theme: Theme): string {
 	return ` ${dot} ${parts.map((part) => theme.fg("dim", part)).join(` ${dot} `)}`;
 }
 
-function entryLine(entry: FleetAgentEntry, isSelected: boolean, now: number, theme: Theme, width: number): string {
+export function entryLine(entry: FleetAgentEntry, isSelected: boolean, now: number, theme: Theme, width: number): string {
 	const prefix = isSelected ? theme.fg("accent", "› ") : "  ";
 	const glyph = stateGlyph(entry.state, theme);
 	const name = themeBold(theme, entry.agent);

@@ -232,7 +232,7 @@ export function themeBold(theme: Theme, text: string): string {
 	return ((theme as { bold?: (value: string) => string }).bold?.(text)) ?? text;
 }
 
-function statJoin(theme: Theme, parts: string[]): string {
+export function statJoin(theme: Theme, parts: string[]): string {
 	return parts.filter(Boolean).map((part) => theme.fg("dim", part)).join(` ${theme.fg("dim", "·")} `);
 }
 
@@ -766,7 +766,7 @@ function widgetStepStats(theme: Theme, step: NonNullable<AsyncJobState["steps"]>
 	]);
 }
 
-function modelThinkingBadge(theme: Theme, model?: string, thinking?: string): string {
+export function modelThinkingBadge(theme: Theme, model?: string, thinking?: string): string {
 	const label = formatModelThinking(model, thinking);
 	return label ? theme.fg("dim", ` (${label})`) : "";
 }
