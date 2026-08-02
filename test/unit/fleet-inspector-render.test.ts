@@ -247,4 +247,27 @@ describe("renderFleetInspector: footer and width", () => {
 			assert.ok(stripAnsi(line).length <= 40, `line too long: ${JSON.stringify(line)}`);
 		}
 	});
+
+	it("shows the 's stop' hint only for a stoppable async entry (PHASE-06)", () => {
+		const stoppable = makeEntry({ key: "a", state: "running", source: "async", canStop: true });
+		const foreground = makeEntry({ key: "b", state: "running", source: "foreground", canStop: true });
+		const stoppableFooter = renderFleetInspector(stoppable, [], emptyTranscript(), baseOpts()).at(-1)!;
+		const foregroundFooter = renderFleetInspector(foreground, [], emptyTranscript(), baseOpts()).at(-1)!;
+		assert.match(stripAnsi(stoppableFooter), /s stop/);
+		assert.doesNotMatch(stripAnsi(foregroundFooter), /s stop/);
+	});
+});
+
+describe("renderFleetInspector: stop confirmation (PHASE-06)", () => {
+	it("renders a stop confirmation line when stopArmed is true", () => {
+		const entry = makeEntry({ key: "a", state: "running" });
+		const lines = renderFleetInspector(entry, [], emptyTranscript(), baseOpts({ stopArmed: true })).map(stripAnsi);
+		assert.ok(lines.some((line) => /Stop bestaetigen/.test(line)));
+	});
+
+	it("does not render a stop confirmation line when stopArmed is false or unset", () => {
+		const entry = makeEntry({ key: "a", state: "running" });
+		const lines = renderFleetInspector(entry, [], emptyTranscript(), baseOpts()).map(stripAnsi);
+		assert.ok(!lines.some((line) => /Stop bestaetigen/.test(line)));
+	});
 });

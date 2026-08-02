@@ -61,6 +61,16 @@
  * fuehren diese Felder - Foreground- und Nested-Eintraege lassen model/
  * thinking daher immer undefined, auch wenn der zugrundeliegende Agent
  * tatsaechlich mit einem bestimmten Modell laeuft.
+ *
+ * KNOWN GAP 7 (PHASE-06): asyncDir/pid (Voraussetzung fuer eine echte,
+ * kanalbasierte Stop-Aktion) existieren strukturell nur auf der Async-
+ * Parent-Zeile (job.asyncDir/job.pid bzw. run.asyncDir - AsyncRunSummary
+ * fuehrt kein pid-Feld, dort bleibt pid daher immer undefined). Foreground-
+ * und Nested-Eintraege sowie Async-Steps fuehren beide Felder nicht - deckt
+ * sich mit canStop, das fuer all diese Quellen ohnehin false ist (siehe
+ * subagent-executor.ts: action="stop" wird fuer foreground/nested explizit
+ * abgelehnt, nur echte Async-Runs besitzen den dateibasierten Stop-Kanal
+ * aus control-channel.ts).
  */
 
 import { shortenPath } from "../../shared/formatters.ts";
@@ -117,6 +127,8 @@ export interface FleetAgentEntry {
 	needsAttention: boolean;
 	attentionReason?: FleetAttentionReason;
 	canStop: boolean;
+	asyncDir?: string;
+	pid?: number;
 
 	currentTool?: string;
 	currentPath?: string;
@@ -481,6 +493,8 @@ export function normalizeAsyncJobState(job: AsyncJobState, ctx: AsyncActiveConte
 		needsAttention: attention.needsAttention,
 		attentionReason: attention.attentionReason,
 		canStop: isLiveRawState(job.status),
+		asyncDir: job.asyncDir,
+		pid: job.pid,
 		currentTool: job.currentTool,
 		currentPath: job.currentPath,
 		activityDetail: pickActivityDetail({
@@ -557,6 +571,7 @@ export function normalizeAsyncRunSummary(run: AsyncRunSummary, ctx: { now: numbe
 		needsAttention: attention.needsAttention,
 		attentionReason: attention.attentionReason,
 		canStop: isLiveRawState(run.state),
+		asyncDir: run.asyncDir,
 		currentTool: run.currentTool,
 		currentPath: run.currentPath,
 		activityDetail: pickActivityDetail({

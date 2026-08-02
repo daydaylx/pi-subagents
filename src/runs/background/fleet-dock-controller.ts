@@ -26,18 +26,39 @@
  * erscheint (z.B. Paste ueber einen anderen Kanal als das Terminal-Input),
  * wird erst beim naechsten Tastendruck erkannt - der Guard prueft nur beim
  * Einlauf jedes Terminal-Inputs, nicht kontinuierlich.
+ *
+ * PHASE-06 - Stop/Dismiss: "s" bewaffnet eine Stop-Bestaetigung fuer den
+ * selektierten Eintrag (nur source==="async", siehe fleet-stop.ts); ein
+ * zweites "s" auf demselben Eintrag loest options.onStop() aus, jede andere
+ * Taste ausser Escape entwaffnet still (kein versehentliches Stoppen durch
+ * eine Taste, die zufaellig spaeter "s" ist). "d" blendet einen selektierten,
+ * bereits terminalen (completed/error/stopped) Top-Level-Eintrag lokal aus
+ * (dismissedKeys) - rein clientseitig, keine Rueckwirkung auf state.asyncJobs
+ * oder status.json. completedEntryVisibleMs() blendet zusaetzlich terminale
+ * Top-Level-Eintraege automatisch aus, sobald sie aelter als das Fenster
+ * sind - Kind-Eintraege eines ausgeblendeten Eintrags kaskadieren mit,
+ * begrenzt auf depth===0 fuer den Alters-Check selbst (ein einzelner
+ * abgeschlossener Schritt soll seinen noch laufenden Parallel-/Chain-Lauf
+ * nicht mitausblenden).
  */
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { isKeyRelease, matchesKey, type Component } from "@earendil-works/pi-tui";
 import type { SubagentState } from "../../shared/types.ts";
 import { renderFleetDock, MAX_DOCK_ROWS } from "../../tui/fleet-dock.ts";
-import { buildFleetEntries, type BuildFleetEntriesDeps, type FleetAgentEntry } from "../shared/fleet-projection.ts";
+import { buildFleetEntries, type BuildFleetEntriesDeps, type FleetAgentEntry, type FleetAgentState } from "../shared/fleet-projection.ts";
 
 type Theme = ExtensionContext["ui"]["theme"];
 type TerminalInputResult = { consume?: boolean; data?: string } | undefined;
 
 export const DEFAULT_REFRESH_INTERVAL_MS = 250;
+export const DEFAULT_COMPLETED_ENTRY_VISIBLE_MS = 5 * 60 * 1000;
+
+const TERMINAL_STATES: ReadonlySet<FleetAgentState> = new Set(["completed", "error", "stopped"]);
+
+function isTerminalState(state: FleetAgentState): boolean {
+	return TERMINAL_STATES.has(state);
+}
 
 export interface FleetDockControllerOptions {
 	now?: () => number;
@@ -49,6 +70,14 @@ export interface FleetDockControllerOptions {
 	// rueckwaertskompatibel - ohne diese Option (z.B. in bestehenden Tests)
 	// bleibt das PHASE-04-Verhalten unveraendert.
 	onOpenInspector?: (key: string) => void;
+	// PHASE-06: Fenster, nach dem ein abgeschlossener/fehlgeschlagener/
+	// gestoppter Top-Level-Eintrag automatisch aus dem Dock verschwindet.
+	completedEntryVisibleMs?: number;
+	// PHASE-06: wird nach der zweiten "s"-Bestaetigung mit dem Key des
+	// betroffenen Eintrags aufgerufen. Der Controller selbst liefert keinen
+	// Stop-Kanal (bleibt reine Zustandsmaschine) - die Wiring-Schicht
+	// entscheidet, wie tatsaechlich gestoppt wird (siehe fleet-stop.ts).
+	onStop?: (key: string) => void;
 }
 
 export class FleetDockController {
@@ -58,6 +87,8 @@ export class FleetDockController {
 	private active = false;
 	private cachedEntries: FleetAgentEntry[] = [];
 	private cachedAt = Number.NEGATIVE_INFINITY;
+	private readonly dismissedKeys = new Set<string>();
+	private stopArmedKey: string | undefined;
 	private readonly state: SubagentState;
 	private readonly options: FleetDockControllerOptions;
 
@@ -80,11 +111,37 @@ export class FleetDockController {
 		return this.options.maxRows ?? MAX_DOCK_ROWS;
 	}
 
+	private completedEntryVisibleMs(): number {
+		return this.options.completedEntryVisibleMs ?? DEFAULT_COMPLETED_ENTRY_VISIBLE_MS;
+	}
+
+	/**
+	 * Entfernt dismisste Eintraege sowie automatisch verfallene Top-Level-
+	 * Eintraege (terminal, aelter als completedEntryVisibleMs()). Kaskadiert
+	 * auf Kind-Eintraege ueber parentKey, da buildFleetEntries() Eltern immer
+	 * vor ihren Kindern liefert (siehe fleet-projection.ts).
+	 */
+	private filterVisible(entries: FleetAgentEntry[], now: number): FleetAgentEntry[] {
+		const removedKeys = new Set<string>();
+		const visible: FleetAgentEntry[] = [];
+		for (const entry of entries) {
+			const parentRemoved = entry.parentKey !== undefined && removedKeys.has(entry.parentKey);
+			const expired = entry.depth === 0 && isTerminalState(entry.state) && now - entry.updatedAt >= this.completedEntryVisibleMs();
+			if (parentRemoved || this.dismissedKeys.has(entry.key) || expired) {
+				removedKeys.add(entry.key);
+				continue;
+			}
+			visible.push(entry);
+		}
+		return visible;
+	}
+
 	/** Liefert die aktuelle FleetAgentEntry-Liste, throttled auf refreshIntervalMs(). */
 	getEntries(): FleetAgentEntry[] {
 		const now = this.now();
 		if (now - this.cachedAt < this.refreshIntervalMs()) return this.cachedEntries;
-		this.cachedEntries = buildFleetEntries(this.state, { now: () => now, ...this.options.deps });
+		const raw = buildFleetEntries(this.state, { now: () => now, ...this.options.deps });
+		this.cachedEntries = this.filterVisible(raw, now);
 		this.cachedAt = now;
 		this.resolveSelection();
 		return this.cachedEntries;
@@ -97,6 +154,12 @@ export class FleetDockController {
 
 	private resolveSelection(): void {
 		const entries = this.cachedEntries;
+		if (this.stopArmedKey !== undefined && !entries.some((entry) => entry.key === this.stopArmedKey)) {
+			// Der bewaffnete Eintrag ist verschwunden (gestoppt+abgelaufen, dismisst,
+			// oder ausserhalb des Sichtbarkeitsfensters) - eine stehende Bestaetigung
+			// darf nicht auf einen spaeter wiederverwendeten Key uebertragen werden.
+			this.stopArmedKey = undefined;
+		}
 		if (entries.length === 0) {
 			this.selectedKey = undefined;
 			this.expandedKey = undefined;
@@ -145,6 +208,28 @@ export class FleetDockController {
 		this.expandedKey = this.expandedKey === this.selectedKey ? undefined : this.selectedKey;
 	}
 
+	/** true, solange fuer key eine Stop-Bestaetigung aussteht ("s" wurde einmal gedrueckt). */
+	isStopArmed(key: string): boolean {
+		return this.stopArmedKey === key;
+	}
+
+	/**
+	 * Blendet einen bereits terminalen (completed/error/stopped) Top-Level-
+	 * Eintrag lokal aus. Laufende/pausierte Eintraege und Kind-Zeilen koennen
+	 * nicht direkt dismisst werden (Aenderungsregel: nur "erledigte
+	 * Eintraege"). Wirkt sofort, nicht erst nach dem naechsten throttled
+	 * getEntries()-Aufruf.
+	 */
+	dismiss(key: string | undefined = this.selectedKey): boolean {
+		if (key === undefined) return false;
+		const entry = this.cachedEntries.find((candidate) => candidate.key === key);
+		if (!entry || entry.depth !== 0 || !isTerminalState(entry.state)) return false;
+		this.dismissedKeys.add(key);
+		this.invalidateCache();
+		this.getEntries();
+		return true;
+	}
+
 	activate(): void {
 		const entries = this.getEntries();
 		this.active = true;
@@ -156,6 +241,7 @@ export class FleetDockController {
 
 	deactivate(): void {
 		this.active = false;
+		this.stopArmedKey = undefined;
 	}
 
 	/**
@@ -174,6 +260,20 @@ export class FleetDockController {
 				return { consume: true };
 			}
 			return undefined;
+		}
+		if (this.stopArmedKey !== undefined) {
+			if (matchesKey(data, "s") && this.stopArmedKey === this.selectedKey) {
+				const key = this.stopArmedKey;
+				this.stopArmedKey = undefined;
+				this.options.onStop?.(key);
+				return { consume: true };
+			}
+			// Jede andere Taste entwaffnet still statt ihre eigentliche Wirkung zu
+			// entfalten UND das Stoppen auszuloesen - verhindert ein versehentliches
+			// Stoppen durch eine spaeter zufaellig erneut gedrueckte "s"-Taste nach
+			// einer Aktion, die den Fokus/die Selektion veraendert hat.
+			this.stopArmedKey = undefined;
+			if (matchesKey(data, "escape")) return { consume: true };
 		}
 		if (matchesKey(data, "escape")) {
 			this.deactivate();
@@ -195,6 +295,16 @@ export class FleetDockController {
 			}
 			return { consume: true };
 		}
+		if (matchesKey(data, "s")) {
+			const key = this.selectedKey;
+			const entry = key !== undefined ? this.cachedEntries.find((candidate) => candidate.key === key) : undefined;
+			if (!entry || entry.source !== "async" || !entry.canStop || !entry.asyncDir) return undefined;
+			this.stopArmedKey = entry.key;
+			return { consume: true };
+		}
+		if (matchesKey(data, "d")) {
+			return this.dismiss() ? { consume: true } : undefined;
+		}
 		return undefined;
 	}
 
@@ -209,6 +319,7 @@ export class FleetDockController {
 					expandedKey: this.expandedKey,
 					maxRows: this.maxRows(),
 					now: this.now(),
+					stopArmedKey: this.stopArmedKey,
 				});
 			},
 			invalidate: () => {},

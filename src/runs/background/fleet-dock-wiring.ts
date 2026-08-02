@@ -67,6 +67,8 @@ import { FLEET_DOCK_WIDGET_KEY, FLEET_INSPECTOR_WIDGET_KEY, WIDGET_KEY, type Ext
 import { createFleetDockController, type FleetDockController } from "./fleet-dock-controller.ts";
 import { createFleetInspectorController, type FleetInspectorController } from "./fleet-inspector-controller.ts";
 import { resolveInspectorTrustedRoots } from "../shared/fleet-transcript-reader.ts";
+import { requestFleetStop } from "./fleet-stop.ts";
+import type { FleetAgentEntry } from "../shared/fleet-projection.ts";
 
 function isStaleExtensionContextError(error: unknown): boolean {
 	return error instanceof Error && error.message.includes("Extension context no longer active");
@@ -86,9 +88,23 @@ export function createFleetDockWiring(state: SubagentState, config: ExtensionCon
 	const placement = config.ui?.fleetViewPlacement ?? "belowEditor";
 
 	let inspectorController: FleetInspectorController | undefined;
+
+	// PHASE-06: gemeinsamer Stop-Dispatch fuer Dock UND Inspector - beide
+	// Controller kennen nur den Key, nicht den vollen FleetAgentEntry; die
+	// Wiring-Schicht loest den Key gegen die aktuelle Entry-Liste auf und ruft
+	// dann requestFleetStop() (siehe fleet-stop.ts, reiner Dispatch ueber den
+	// bestehenden dateibasierten Control-Kanal, keine neue Orchestrierung).
+	function handleFleetStop(key: string): void {
+		const entry: FleetAgentEntry | undefined = controller?.getEntries().find((candidate) => candidate.key === key);
+		if (!entry) return;
+		requestFleetStop(entry);
+		controller?.invalidateCache();
+	}
+
 	const controller: FleetDockController | undefined = fleetViewEnabled
 		? createFleetDockController(state, {
 				onOpenInspector: (key) => inspectorController?.open(key),
+				onStop: handleFleetStop,
 			})
 		: undefined;
 	inspectorController = controller
@@ -99,6 +115,7 @@ export function createFleetDockWiring(state: SubagentState, config: ExtensionCon
 						projectCwd: state.baseCwd,
 						worktreeBaseDir: config.worktreeBaseDir,
 					}),
+				onStop: handleFleetStop,
 			})
 		: undefined;
 

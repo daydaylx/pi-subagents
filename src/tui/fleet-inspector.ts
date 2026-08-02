@@ -34,6 +34,9 @@ export interface RenderFleetInspectorOptions {
 	toolDetailsExpanded: boolean;
 	maxVisibleLines?: number;
 	now?: number;
+	// PHASE-06: true, waehrend fuer den offenen Eintrag eine Stop-Bestaetigung
+	// aussteht (erstes "s" wurde gedrueckt, siehe fleet-inspector-controller.ts).
+	stopArmed?: boolean;
 }
 
 const ATTENTION_REASON_TEXT: Record<FleetAttentionReason, string> = {
@@ -122,6 +125,10 @@ export function renderFleetInspector(
 		lines.push(truncLine(theme.fg(color, `\u26a0 ${reasonText}`), width));
 	}
 
+	if (opts.stopArmed) {
+		lines.push(truncLine(theme.fg("warning", "Stop bestaetigen: erneut 's' druecken (Escape zum Abbrechen)"), width));
+	}
+
 	if (children.length > 0) {
 		const visibleChildren = children.slice(0, MAX_INSPECTOR_CHILDREN_ROWS);
 		const hiddenChildren = children.slice(MAX_INSPECTOR_CHILDREN_ROWS);
@@ -150,9 +157,13 @@ export function renderFleetInspector(
 		}
 	}
 
+	const stopHint = entry.source === "async" && entry.canStop ? " \u00b7 s stop" : "";
 	lines.push(
 		truncLine(
-			theme.fg("dim", `\u2191\u2193 scroll \u00b7 PgUp/PgDn page \u00b7 Space ${toolDetailsExpanded ? "collapse" : "expand"} tool details \u00b7 Esc close`),
+			theme.fg(
+				"dim",
+				`\u2191\u2193 scroll \u00b7 PgUp/PgDn page \u00b7 Space ${toolDetailsExpanded ? "collapse" : "expand"} tool details${stopHint} \u00b7 Esc close`,
+			),
 			width,
 		),
 	);

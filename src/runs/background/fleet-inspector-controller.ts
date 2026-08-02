@@ -42,6 +42,10 @@ export interface FleetInspectorControllerOptions {
 	maxVisibleLines?: number;
 	trustedRoots?: () => string[];
 	readTranscript?: typeof readChildTranscript;
+	// PHASE-06: wird nach der zweiten "s"-Bestaetigung mit dem Key des offenen
+	// Eintrags aufgerufen - spiegelt FleetDockControllerOptions.onStop, damit
+	// Stop von Dock UND Inspector aus identisch funktioniert (siehe DECISIONS.md).
+	onStop?: (key: string) => void;
 }
 
 export class FleetInspectorController {
@@ -51,6 +55,7 @@ export class FleetInspectorController {
 	private toolDetailsExpanded = false;
 	private cachedTranscript: ReadChildTranscriptResult = EMPTY_TRANSCRIPT;
 	private cachedAt = Number.NEGATIVE_INFINITY;
+	private stopArmed = false;
 	private readonly getEntries: () => FleetAgentEntry[];
 	private readonly options: FleetInspectorControllerOptions;
 
@@ -88,11 +93,17 @@ export class FleetInspectorController {
 		this.openKey = key;
 		this.scrollFromBottom = 0;
 		this.toolDetailsExpanded = false;
+		this.stopArmed = false;
 		this.invalidateTranscriptCache();
 	}
 
 	close(): void {
 		this.isOpenFlag = false;
+		this.stopArmed = false;
+	}
+
+	isStopArmed(): boolean {
+		return this.stopArmed;
 	}
 
 	getSelectedEntry(): FleetAgentEntry | undefined {
@@ -169,6 +180,28 @@ export class FleetInspectorController {
 		if (isKeyRelease(data)) return undefined;
 		if (!this.isOpenFlag) return undefined;
 
+		if (matchesKey(data, "s")) {
+			if (this.stopArmed) {
+				this.stopArmed = false;
+				if (this.openKey !== undefined) this.options.onStop?.(this.openKey);
+				return { consume: true };
+			}
+			const entry = this.getSelectedEntry();
+			if (!entry || entry.source !== "async" || !entry.canStop || !entry.asyncDir) return { consume: true };
+			this.stopArmed = true;
+			return { consume: true };
+		}
+		if (this.stopArmed) {
+			// Jede andere Taste entwaffnet still statt zusaetzlich ihre eigentliche
+			// Wirkung zu entfalten UND das Stoppen auszuloesen - dieselbe Begruendung
+			// wie in FleetDockController.handleTerminalInput(). Escape entwaffnet nur
+			// (schliesst den Inspector in diesem Tastendruck noch nicht), damit ein
+			// versehentliches Doppel-Escape nicht sowohl die Bestaetigung abbricht als
+			// auch gleich den Inspector schliesst.
+			this.stopArmed = false;
+			if (matchesKey(data, "escape")) return { consume: true };
+		}
+
 		if (matchesKey(data, "escape")) {
 			this.close();
 			return { consume: true };
@@ -224,6 +257,7 @@ export class FleetInspectorController {
 					toolDetailsExpanded: this.toolDetailsExpanded,
 					maxVisibleLines: this.maxVisibleLines(),
 					now: this.now(),
+					stopArmed: this.stopArmed,
 				});
 			},
 			invalidate: () => {},

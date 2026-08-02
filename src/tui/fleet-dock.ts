@@ -5,6 +5,14 @@
  * eigener Zustand (Auswahl/Expansion werden vom Aufrufer als Parameter
  * uebergeben). Analog zu buildWidgetLines() im alten Async-Widget
  * (../tui/render.ts), aber unabhaengig vom AsyncJobState-Typ.
+ *
+ * PHASE-06: needs_attention sortiert jetzt strikt vor running (eigener Rang,
+ * nicht mehr gleichrangig+updatedAt-Tiebreak) - ein Attention-Eintrag soll
+ * nicht mehr rein durch Alter unter die MAX_DOCK_ROWS-Sichtgrenze rutschen
+ * und unmarkiert in der "+N weitere"-Zeile verschwinden koennen. Die
+ * Aktivitaetszeile eines needsAttention-Eintrags wird zusaetzlich in
+ * "warning" statt "dim" gerendert, statt sich allein auf das ⚠-Glyphenzeichen
+ * zu verlassen.
  */
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -20,11 +28,11 @@ export const MAX_DOCK_ROWS = 6;
 // updatedAt sortiert), dann paused, dann alle Terminalzustaende zuletzt.
 const STATE_RANK: Record<FleetAgentState, number> = {
 	needs_attention: 0,
-	running: 0,
-	paused: 1,
-	completed: 2,
-	error: 2,
-	stopped: 2,
+	running: 1,
+	paused: 2,
+	completed: 3,
+	error: 3,
+	stopped: 3,
 };
 
 export function sortFleetEntries(entries: FleetAgentEntry[]): FleetAgentEntry[] {
@@ -52,7 +60,11 @@ function entryStats(entry: FleetAgentEntry, now: number, theme: Theme): string {
 	if (tokenTotal !== undefined) parts.push(formatTokens(tokenTotal));
 	if (parts.length === 0) return "";
 	const dot = theme.fg("dim", "·");
-	return ` ${dot} ${parts.map((part) => theme.fg("dim", part)).join(` ${dot} `)}`;
+	// PHASE-06: needsAttention faerbt die Aktivitaetszeile "warning" statt
+	// "dim" - das Glyphenzeichen allein reicht nicht als deutliche Anzeige,
+	// siehe Header-Kommentar dieser Datei.
+	const partColor = entry.needsAttention ? "warning" : "dim";
+	return ` ${dot} ${parts.map((part) => theme.fg(partColor, part)).join(` ${dot} `)}`;
 }
 
 export function entryLine(entry: FleetAgentEntry, isSelected: boolean, now: number, theme: Theme, width: number): string {
@@ -88,6 +100,14 @@ export interface RenderFleetDockOptions {
 	expandedKey?: string;
 	maxRows?: number;
 	now?: number;
+	// PHASE-06: Key eines Eintrags mit ausstehender Stop-Bestaetigung (erstes
+	// "s" wurde gedrueckt). Rendert eine explizite Bestaetigungszeile direkt
+	// unter dem betroffenen Eintrag.
+	stopArmedKey?: string;
+}
+
+function stopConfirmLine(theme: Theme, width: number): string {
+	return truncLine(theme.fg("warning", "      Stop bestaetigen: erneut 's' druecken (Escape zum Abbrechen)"), width);
 }
 
 /**
@@ -97,7 +117,7 @@ export interface RenderFleetDockOptions {
  * Throttling und Key-basierte Selektion zustaendig.
  */
 export function renderFleetDock(entries: FleetAgentEntry[], selectedKey: string | undefined, opts: RenderFleetDockOptions): string[] {
-	const { width, theme, expandedKey, maxRows = MAX_DOCK_ROWS, now = Date.now() } = opts;
+	const { width, theme, expandedKey, maxRows = MAX_DOCK_ROWS, now = Date.now(), stopArmedKey } = opts;
 	if (entries.length === 0) {
 		return [truncLine(theme.fg("dim", "keine aktiven Subagenten"), width)];
 	}
@@ -108,6 +128,7 @@ export function renderFleetDock(entries: FleetAgentEntry[], selectedKey: string 
 	for (const entry of visible) {
 		lines.push(entryLine(entry, entry.key === selectedKey, now, theme, width));
 		if (expandedKey === entry.key) lines.push(...detailLines(entry, theme, width));
+		if (stopArmedKey === entry.key) lines.push(stopConfirmLine(theme, width));
 	}
 	if (hidden.length > 0) {
 		lines.push(truncLine(theme.fg("dim", `  +${hidden.length} weitere`), width));

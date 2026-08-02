@@ -290,3 +290,61 @@ describe("FleetInspectorController createComponent", () => {
 		assert.ok(lines.some((line) => line.includes("worker-x")));
 	});
 });
+
+describe("FleetInspectorController stop confirmation (PHASE-06)", () => {
+	it("arms on the first 's' and only fires onStop after a second 's'", () => {
+		const entry = makeEntry({ key: "a", state: "running", asyncDir: "/tmp/async-1" });
+		const stopped: string[] = [];
+		const controller = createFleetInspectorController(() => [entry], { onStop: (key) => stopped.push(key) });
+		controller.open("a");
+		const first = controller.handleTerminalInput("s");
+		assert.equal(first?.consume, true);
+		assert.equal(controller.isStopArmed(), true);
+		assert.equal(stopped.length, 0);
+		const second = controller.handleTerminalInput("s");
+		assert.equal(second?.consume, true);
+		assert.deepEqual(stopped, ["a"]);
+		assert.equal(controller.isStopArmed(), false);
+	});
+
+	it("does not arm for a foreground entry", () => {
+		const entry = makeEntry({ key: "a", state: "running", source: "foreground", asyncDir: undefined });
+		const controller = createFleetInspectorController(() => [entry]);
+		controller.open("a");
+		controller.handleTerminalInput("s");
+		assert.equal(controller.isStopArmed(), false);
+	});
+
+	it("disarms silently on any other key without ever calling onStop", () => {
+		const entry = makeEntry({ key: "a", state: "running", asyncDir: "/tmp/async-1" });
+		const stopped: string[] = [];
+		const controller = createFleetInspectorController(() => [entry], { onStop: (key) => stopped.push(key) });
+		controller.open("a");
+		controller.handleTerminalInput("s");
+		assert.equal(controller.isStopArmed(), true);
+		controller.handleTerminalInput(UP);
+		assert.equal(controller.isStopArmed(), false);
+		assert.equal(stopped.length, 0);
+	});
+
+	it("escape while armed cancels only the confirmation - the inspector stays open", () => {
+		const entry = makeEntry({ key: "a", state: "running", asyncDir: "/tmp/async-1" });
+		const controller = createFleetInspectorController(() => [entry]);
+		controller.open("a");
+		controller.handleTerminalInput("s");
+		const result = controller.handleTerminalInput(ESC);
+		assert.equal(result?.consume, true);
+		assert.equal(controller.isStopArmed(), false);
+		assert.equal(controller.isOpen(), true);
+	});
+
+	it("close() clears a pending stop arm", () => {
+		const entry = makeEntry({ key: "a", state: "running", asyncDir: "/tmp/async-1" });
+		const controller = createFleetInspectorController(() => [entry]);
+		controller.open("a");
+		controller.handleTerminalInput("s");
+		controller.close();
+		assert.equal(controller.isStopArmed(), false);
+	});
+});
+

@@ -438,3 +438,48 @@ describe("createFleetDockWiring - inspector (PHASE-05)", () => {
 		}
 	});
 });
+
+describe("createFleetDockWiring - stop dispatch (PHASE-06)", () => {
+	function config(overrides: Record<string, unknown> = {}): ExtensionConfig {
+		return { ui: { fleetView: true, ...overrides } } as ExtensionConfig;
+	}
+
+	it("delivers a real stop request file to the async run's control inbox after the second 's'", () => {
+		const asyncRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pi-fleet-dock-wiring-stop-"));
+		try {
+			const asyncDir = path.join(asyncRoot, "async-1");
+			fs.mkdirSync(asyncDir, { recursive: true });
+			const job = makeAsyncJobState({ asyncDir, status: "running", pid: 4242 });
+			const state = makeState({ asyncJobs: new Map([["async-1", job]]) });
+			const wiring = createFleetDockWiring(state, config());
+			const { ctx, fake } = makeCtx();
+			wiring.onSessionStart(ctx as never);
+
+			fake.terminalInputHandler!(DOWN); // activate dock, select the async parent row
+			const first = fake.terminalInputHandler!("s");
+			assert.equal(first?.consume, true);
+			const stopFile = path.join(asyncDir, "control", "stop.json");
+			assert.ok(!fs.existsSync(stopFile), "the first 's' only arms the confirmation, it must not stop yet");
+
+			const second = fake.terminalInputHandler!("s");
+			assert.equal(second?.consume, true);
+			assert.ok(fs.existsSync(stopFile), "the second 's' on the same entry must deliver a real stop request");
+			const payload = JSON.parse(fs.readFileSync(stopFile, "utf-8"));
+			assert.equal(payload.type, "stop");
+		} finally {
+			fs.rmSync(asyncRoot, { recursive: true, force: true });
+		}
+	});
+
+	it("never writes a stop request for a foreground entry - no terminal stop channel exists for it", () => {
+		const state = makeState({ foregroundControls: new Map([["run-1", makeForegroundControl({ runId: "run-1" })]]) });
+		const wiring = createFleetDockWiring(state, config());
+		const { ctx, fake } = makeCtx();
+		wiring.onSessionStart(ctx as never);
+
+		fake.terminalInputHandler!(DOWN);
+		const result = fake.terminalInputHandler!("s");
+		assert.equal(result, undefined);
+	});
+});
+

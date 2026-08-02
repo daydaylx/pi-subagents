@@ -34,7 +34,10 @@ function makeEntry(overrides: Partial<FleetAgentEntry> & { key: string; state: F
 }
 
 describe("sortFleetEntries", () => {
-	it("orders needs_attention/running before paused before terminal states", () => {
+	it("orders needs_attention strictly before running before paused before terminal states (PHASE-06)", () => {
+		// needs_attention has its own rank ahead of running (not just a same-rank,
+		// updatedAt-broken tie) so an attention entry can never age out of the
+		// visible MAX_DOCK_ROWS window before a plain running entry does.
 		const entries = [
 			makeEntry({ key: "a", state: "completed", updatedAt: 100 }),
 			makeEntry({ key: "b", state: "needs_attention", updatedAt: 1 }),
@@ -42,7 +45,7 @@ describe("sortFleetEntries", () => {
 			makeEntry({ key: "d", state: "running", updatedAt: 2 }),
 		];
 		const sorted = sortFleetEntries(entries).map((e) => e.key);
-		assert.deepEqual(sorted, ["d", "b", "c", "a"]);
+		assert.deepEqual(sorted, ["b", "d", "c", "a"]);
 	});
 
 	it("breaks ties within the same rank by updatedAt descending", () => {
@@ -117,5 +120,35 @@ describe("renderFleetDock", () => {
 		for (const line of lines) {
 			assert.ok(stripAnsi(line).length <= 20, `line too long: ${JSON.stringify(line)}`);
 		}
+	});
+
+	it("renders the activity line in warning color for a needsAttention entry, dim otherwise (PHASE-06)", () => {
+		const taggingTheme = {
+			fg: (name: string, text: string) => `[${name}]${text}[/${name}]`,
+			bg: (_name: string, text: string) => text,
+			bold: (text: string) => text,
+		} as unknown as Parameters<typeof renderFleetDock>[2]["theme"];
+		const entries = [
+			makeEntry({ key: "a", state: "needs_attention", agent: "alpha", activityDetail: "watchdog: stalled", needsAttention: true }),
+			makeEntry({ key: "b", state: "running", agent: "beta", activityDetail: "tool: bash", updatedAt: -1 }),
+		];
+		const lines = renderFleetDock(entries, undefined, { width: 200, theme: taggingTheme, now: 0 });
+		const attentionLine = lines.find((line) => line.includes("alpha"))!;
+		const runningLine = lines.find((line) => line.includes("beta"))!;
+		assert.match(attentionLine, /\[warning\]watchdog: stalled\[\/warning\]/);
+		assert.match(runningLine, /\[dim\]tool: bash\[\/dim\]/);
+	});
+
+	it("renders a stop confirmation line only under the armed entry (PHASE-06)", () => {
+		const entries = [
+			makeEntry({ key: "a", state: "running", agent: "alpha" }),
+			makeEntry({ key: "b", state: "running", agent: "beta", updatedAt: -1 }),
+		];
+		const lines = renderFleetDock(entries, undefined, { width: 200, theme: makeTheme(), now: 0, stopArmedKey: "a" });
+		const alphaIdx = lines.findIndex((line) => line.includes("alpha"));
+		assert.match(stripAnsi(lines[alphaIdx + 1]!), /Stop bestaetigen/);
+		const betaIdx = lines.findIndex((line) => line.includes("beta"));
+		const afterBeta = lines[betaIdx + 1];
+		assert.ok(afterBeta === undefined || !stripAnsi(afterBeta).includes("Stop bestaetigen"));
 	});
 });

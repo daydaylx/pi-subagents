@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { ForegroundControlState, SubagentState } from "../../src/shared/types.ts";
+import type { AsyncJobState, ForegroundControlState, SubagentState } from "../../src/shared/types.ts";
 import { createFleetDockController, DEFAULT_REFRESH_INTERVAL_MS } from "../../src/runs/background/fleet-dock-controller.ts";
 
 // buildFleetEntries() falls back to a real disk scan (listAsyncRuns) for
@@ -37,6 +37,15 @@ function makeForegroundControl(overrides: Partial<ForegroundControlState> = {}):
 		currentAgent: "worker",
 		...overrides,
 	} as ForegroundControlState;
+}
+
+function makeAsyncJobState(overrides: Partial<AsyncJobState> = {}): AsyncJobState {
+	return {
+		asyncId: "async-1",
+		asyncDir: "/tmp/async-1",
+		status: "running",
+		...overrides,
+	} as AsyncJobState;
 }
 
 function makeClock(start: number) {
@@ -267,3 +276,153 @@ describe("FleetDockController onOpenInspector", () => {
 		assert.equal(controller.getExpandedKey(), firstKey);
 	});
 });
+
+describe("FleetDockController stop confirmation (PHASE-06)", () => {
+	function stateWithAsyncEntry(overrides: Partial<AsyncJobState> = {}) {
+		return makeState({
+			asyncJobs: new Map([["async-1", makeAsyncJobState(overrides)]]),
+		});
+	}
+
+	it("arms on the first 's' and only fires onStop after a second 's' on the same entry", () => {
+		const stopped: string[] = [];
+		const controller = createFleetDockController(stateWithAsyncEntry(), {
+			...NO_ASYNC_DEPS,
+			onStop: (key) => stopped.push(key),
+		});
+		controller.handleTerminalInput(emptyEditor(), "\u001b[B"); // activate + select the async parent row
+		const key = controller.getSelectedKey()!;
+		const first = controller.handleTerminalInput(emptyEditor(), "s");
+		assert.equal(first?.consume, true);
+		assert.equal(controller.isStopArmed(key), true);
+		assert.equal(stopped.length, 0);
+		const second = controller.handleTerminalInput(emptyEditor(), "s");
+		assert.equal(second?.consume, true);
+		assert.deepEqual(stopped, [key]);
+		assert.equal(controller.isStopArmed(key), false);
+	});
+
+	it("does not arm for a foreground entry - no terminal stop channel exists for it", () => {
+		const controller = createFleetDockController(
+			makeState({ foregroundControls: new Map([["run-1", makeForegroundControl()]]) }),
+			NO_ASYNC_DEPS,
+		);
+		controller.handleTerminalInput(emptyEditor(), "\u001b[B");
+		const key = controller.getSelectedKey()!;
+		const result = controller.handleTerminalInput(emptyEditor(), "s");
+		assert.equal(result, undefined);
+		assert.equal(controller.isStopArmed(key), false);
+	});
+
+	it("does not arm for an async entry that is no longer stoppable", () => {
+		const controller = createFleetDockController(stateWithAsyncEntry({ status: "stopped" }), NO_ASYNC_DEPS);
+		controller.handleTerminalInput(emptyEditor(), "\u001b[B");
+		const key = controller.getSelectedKey()!;
+		const result = controller.handleTerminalInput(emptyEditor(), "s");
+		assert.equal(result, undefined);
+		assert.equal(controller.isStopArmed(key), false);
+	});
+
+	it("disarms silently on any other key without ever calling onStop", () => {
+		const stopped: string[] = [];
+		const controller = createFleetDockController(stateWithAsyncEntry(), {
+			...NO_ASYNC_DEPS,
+			onStop: (key) => stopped.push(key),
+		});
+		controller.handleTerminalInput(emptyEditor(), "\u001b[B");
+		const key = controller.getSelectedKey()!;
+		controller.handleTerminalInput(emptyEditor(), "s");
+		assert.equal(controller.isStopArmed(key), true);
+		controller.handleTerminalInput(emptyEditor(), "\u001b[A"); // up, unrelated key
+		assert.equal(controller.isStopArmed(key), false);
+		assert.equal(stopped.length, 0);
+	});
+
+	it("escape while armed cancels only the confirmation - the dock stays active", () => {
+		const controller = createFleetDockController(stateWithAsyncEntry(), NO_ASYNC_DEPS);
+		controller.handleTerminalInput(emptyEditor(), "\u001b[B");
+		const key = controller.getSelectedKey()!;
+		controller.handleTerminalInput(emptyEditor(), "s");
+		assert.equal(controller.isStopArmed(key), true);
+		const result = controller.handleTerminalInput(emptyEditor(), "\u001b");
+		assert.equal(result?.consume, true);
+		assert.equal(controller.isStopArmed(key), false);
+		assert.equal(controller.isActive(), true);
+	});
+
+	it("deactivate() clears a pending stop arm", () => {
+		const controller = createFleetDockController(stateWithAsyncEntry(), NO_ASYNC_DEPS);
+		controller.handleTerminalInput(emptyEditor(), "\u001b[B");
+		const key = controller.getSelectedKey()!;
+		controller.handleTerminalInput(emptyEditor(), "s");
+		controller.deactivate();
+		assert.equal(controller.isStopArmed(key), false);
+	});
+});
+
+describe("FleetDockController dismiss and visibility window (PHASE-06)", () => {
+	it("dismiss() hides a terminal top-level entry immediately, not just after the next throttled refresh", () => {
+		const state = makeState({
+			asyncJobs: new Map([["async-1", makeAsyncJobState({ status: "complete" })]]),
+		});
+		const controller = createFleetDockController(state, NO_ASYNC_DEPS);
+		const before = controller.getEntries();
+		assert.equal(before.length, 1);
+		const dismissed = controller.dismiss(before[0]!.key);
+		assert.equal(dismissed, true);
+		assert.equal(controller.getEntries().length, 0);
+	});
+
+	it("dismiss() is a no-op for a still-running entry", () => {
+		const state = makeState({
+			asyncJobs: new Map([["async-1", makeAsyncJobState({ status: "running" })]]),
+		});
+		const controller = createFleetDockController(state, NO_ASYNC_DEPS);
+		const [entry] = controller.getEntries();
+		const dismissed = controller.dismiss(entry!.key);
+		assert.equal(dismissed, false);
+		assert.equal(controller.getEntries().length, 1);
+	});
+
+	it("'d' dismisses the selected terminal entry via handleTerminalInput", () => {
+		const state = makeState({
+			asyncJobs: new Map([["async-1", makeAsyncJobState({ status: "complete" })]]),
+		});
+		const controller = createFleetDockController(state, NO_ASYNC_DEPS);
+		controller.handleTerminalInput(emptyEditor(), "\u001b[B");
+		const result = controller.handleTerminalInput(emptyEditor(), "d");
+		assert.equal(result?.consume, true);
+		assert.equal(controller.getEntries().length, 0);
+	});
+
+	it("auto-hides a terminal top-level entry once it is older than completedEntryVisibleMs, cascading to its step children", () => {
+		const state = makeState({
+			asyncJobs: new Map([
+				[
+					"async-1",
+					makeAsyncJobState({
+						status: "complete",
+						updatedAt: 1000,
+						steps: [{ index: 0, agent: "worker-a", status: "completed" }],
+					}),
+				],
+			]),
+		});
+		const clock = makeClock(1000);
+		const controller = createFleetDockController(state, { now: clock.now, completedEntryVisibleMs: 1000, ...NO_ASYNC_DEPS });
+		assert.equal(controller.getEntries().length, 2);
+		clock.advance(1000 + DEFAULT_REFRESH_INTERVAL_MS + 1);
+		assert.equal(controller.getEntries().length, 0);
+	});
+
+	it("never auto-hides a still-active entry, regardless of age", () => {
+		const state = makeState({
+			asyncJobs: new Map([["async-1", makeAsyncJobState({ status: "running", updatedAt: 1000 })]]),
+		});
+		const clock = makeClock(1000);
+		const controller = createFleetDockController(state, { now: clock.now, completedEntryVisibleMs: 1000, ...NO_ASYNC_DEPS });
+		clock.advance(1_000_000);
+		assert.equal(controller.getEntries().length, 1);
+	});
+});
+

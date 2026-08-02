@@ -406,6 +406,19 @@ describe("normalizeAsyncJobState", () => {
 		assert.equal(recentEntry.canStop, false);
 	});
 
+	it("exposes asyncDir/pid on the parent entry for a live job, not on step entries", () => {
+		const job = makeAsyncJobState({
+			asyncDir: "/tmp/async-1",
+			pid: 4242,
+			steps: [{ index: 0, agent: "worker-a", status: "running" }],
+		});
+		const [parentEntry, stepEntry] = normalizeAsyncJobState(job, { pending: [], now: 1000 });
+		assert.equal(parentEntry?.asyncDir, "/tmp/async-1");
+		assert.equal(parentEntry?.pid, 4242);
+		assert.equal(stepEntry?.asyncDir, undefined);
+		assert.equal(stepEntry?.pid, undefined);
+	});
+
 	it("builds one row per step with stable composite keys", () => {
 		const job = makeAsyncJobState({
 			steps: [
@@ -475,6 +488,13 @@ describe("normalizeAsyncRunSummary", () => {
 		const [entry] = normalizeAsyncRunSummary(run, { now: 1000 });
 		assert.equal(entry.kind, "active");
 	});
+
+	it("exposes asyncDir on the parent entry without a pid (disk summaries carry no pid)", () => {
+		const run = makeAsyncRunSummary({ asyncDir: "/tmp/async-9", state: "running" });
+		const [entry] = normalizeAsyncRunSummary(run, { now: 1000 });
+		assert.equal(entry.asyncDir, "/tmp/async-9");
+		assert.equal(entry.pid, undefined);
+	});
 });
 
 describe("normalizeAsyncRunSummary model/thinking", () => {
@@ -505,6 +525,27 @@ describe("KNOWN GAP 6: model/thinking are undefined outside async steps", () => 
 		for (const entry of entries) {
 			assert.equal(entry.model, undefined);
 			assert.equal(entry.thinking, undefined);
+		}
+	});
+});
+
+describe("KNOWN GAP 7: asyncDir/pid are undefined outside async parent entries", () => {
+	it("leaves asyncDir/pid undefined on foreground active entries", () => {
+		const control = makeForegroundControl({ mode: "single", currentAgent: "reviewer" });
+		const entry = normalizeForegroundActive(control, { pending: [], now: 1000 });
+		assert.equal(entry.asyncDir, undefined);
+		assert.equal(entry.pid, undefined);
+	});
+
+	it("leaves asyncDir/pid undefined on nested run/step entries", () => {
+		const run = makeNestedRunSummary({
+			state: "running",
+			steps: [{ agent: "worker-a", status: "running" }],
+		});
+		const entries = normalizeNestedRun(run, "foreground:active:run-1", 1, { now: 1000, source: "foreground", rootRunId: "run-1" });
+		for (const entry of entries) {
+			assert.equal(entry.asyncDir, undefined);
+			assert.equal(entry.pid, undefined);
 		}
 	});
 });

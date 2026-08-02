@@ -44,7 +44,19 @@ export function createAsyncJobTracker(pi: Pick<ExtensionAPI, "events">, state: S
 	const resultsDir = options.resultsDir ?? RESULTS_DIR;
 	const showAsyncWidget = options.showAsyncWidget !== false;
 	const rerenderWidget = (ctx: ExtensionContext, jobs = Array.from(state.asyncJobs.values())) => {
-		if (!showAsyncWidget || state.suppressAsyncWidget) return;
+		if (state.suppressAsyncWidget) {
+			// PHASE-06: FleetView ist aktiv und unterdrueckt das alte Widget - der
+			// renderWidget()-Aufruf entfaellt, aber ein Repaint wird trotzdem
+			// angestossen, damit Async-Start/-Abschluss/Pause/Stop/Fehler auch dann
+			// sofort im Fleet Dock sichtbar werden, wenn die Aenderung nicht ueber
+			// einen tool_result-Event laeuft (z.B. ein reiner Poller-Tick). Ohne
+			// diesen Aufruf aktualisiert sich das throttled FleetDockController-
+			// Widget erst beim naechsten ohnehin stattfindenden Repaint (z.B.
+			// Tastendruck) - siehe DECISIONS.md.
+			ctx.ui.requestRender?.();
+			return;
+		}
+		if (!showAsyncWidget) return;
 		renderWidget(ctx, jobs);
 		ctx.ui.requestRender?.();
 	};
