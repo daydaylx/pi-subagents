@@ -248,6 +248,23 @@ describe("renderFleetInspector: footer and width", () => {
 		}
 	});
 
+	it("stays within bounds and keeps identifying info readable at 80/120/160 columns (PHASE-07)", () => {
+		const entry = makeEntry({ key: "a", state: "running", agent: "alpha-worker", source: "async", description: "a moderately long description of the current task" });
+		const transcript: { events: TranscriptEvent[]; truncated: boolean } = {
+			events: [{ type: "assistant", text: "a fairly long assistant message that spans a good portion of the line" }] as unknown as TranscriptEvent[],
+			truncated: false,
+		};
+		for (const width of [80, 120, 160]) {
+			const lines = renderFleetInspector(entry, [], transcript, baseOpts({ width }));
+			assert.ok(lines.length > 0, `no output at width ${width}`);
+			for (const line of lines) {
+				assert.ok(stripAnsi(line).length <= width, `line too long at width ${width}: ${JSON.stringify(line)}`);
+			}
+			const rendered = lines.map(stripAnsi).join("\n");
+			assert.match(rendered, /alpha-worker/, `agent name truncated away at width ${width}`);
+		}
+	});
+
 	it("shows the 's stop' hint only for a stoppable async entry (PHASE-06)", () => {
 		const stoppable = makeEntry({ key: "a", state: "running", source: "async", canStop: true });
 		const foreground = makeEntry({ key: "b", state: "running", source: "foreground", canStop: true });

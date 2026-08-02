@@ -122,6 +122,23 @@ describe("renderFleetDock", () => {
 		}
 	});
 
+	it("stays within bounds and keeps the agent name readable at 80/120/160 columns (PHASE-07)", () => {
+		const entries = [
+			makeEntry({ key: "a", state: "needs_attention", agent: "alpha", needsAttention: true, activityDetail: "watchdog: stalled after long-running tool call" }),
+			makeEntry({ key: "b", state: "running", agent: "beta", activityDetail: "tool: bash - running a fairly long shell command" }),
+		];
+		for (const width of [80, 120, 160]) {
+			const lines = renderFleetDock(entries, undefined, { width, theme: makeTheme(), now: 0 });
+			assert.ok(lines.length > 0, `no output at width ${width}`);
+			for (const line of lines) {
+				assert.ok(stripAnsi(line).length <= width, `line too long at width ${width}: ${JSON.stringify(line)}`);
+			}
+			const rendered = lines.map(stripAnsi).join("\n");
+			assert.match(rendered, /alpha/, `agent name truncated away at width ${width}`);
+			assert.match(rendered, /beta/, `agent name truncated away at width ${width}`);
+		}
+	});
+
 	it("renders the activity line in warning color for a needsAttention entry, dim otherwise (PHASE-06)", () => {
 		const taggingTheme = {
 			fg: (name: string, text: string) => `[${name}]${text}[/${name}]`,
