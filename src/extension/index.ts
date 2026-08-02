@@ -28,6 +28,7 @@ import { SubagentParams, WaitParams } from "./schemas.ts";
 import { createSubagentExecutor, type SubagentParamsLike } from "../runs/foreground/subagent-executor.ts";
 import { createAsyncJobTracker } from "../runs/background/async-job-tracker.ts";
 import { createResultWatcher } from "../runs/background/result-watcher.ts";
+import { createFleetDockWiring } from "../runs/background/fleet-dock-wiring.ts";
 import { createScheduledRunManager } from "../runs/background/scheduled-runs.ts";
 import { registerSlashCommands } from "../slash/slash-commands.ts";
 import { registerPromptTemplateDelegationBridge } from "../slash/prompt-template-bridge.ts";
@@ -285,6 +286,7 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 			clear: () => {},
 		},
 	};
+	const fleetDockWiring = createFleetDockWiring(state, config);
 
 	const supervisorChannel = createNativeSupervisorChannel(pi, state);
 	const mainWatchdog = registerMainWatchdog(pi);
@@ -307,6 +309,7 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 			clearInterval(state.poller);
 			state.poller = null;
 		}
+		fleetDockWiring.dispose();
 	};
 	globalStore[runtimeCleanupStoreKey] = runtimeCleanup;
 
@@ -578,6 +581,7 @@ wait also returns when a run needs attention (a child that went idle or blocked 
 			ctx.ui.requestRender?.();
 			ensurePoller();
 		}
+		fleetDockWiring.onToolResult(ctx);
 	});
 
 	const cleanupSessionArtifacts = (ctx: ExtensionContext) => {
@@ -614,6 +618,7 @@ wait also returns when a run needs attention (a child that went idle or blocked 
 		scheduledRunManager.bindSession(ctx);
 		restoreSlashFinalSnapshots(ctx.sessionManager.getEntries());
 		primeExistingResults();
+		fleetDockWiring.onSessionStart(ctx);
 	};
 
 	pi.on("session_start", (_event, ctx) => {

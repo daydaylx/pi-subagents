@@ -44,7 +44,7 @@ export function createAsyncJobTracker(pi: Pick<ExtensionAPI, "events">, state: S
 	const resultsDir = options.resultsDir ?? RESULTS_DIR;
 	const showAsyncWidget = options.showAsyncWidget !== false;
 	const rerenderWidget = (ctx: ExtensionContext, jobs = Array.from(state.asyncJobs.values())) => {
-		if (!showAsyncWidget) return;
+		if (!showAsyncWidget || state.suppressAsyncWidget) return;
 		renderWidget(ctx, jobs);
 		ctx.ui.requestRender?.();
 	};

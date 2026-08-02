@@ -6,7 +6,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { Message } from "@earendil-works/pi-ai";
 import type { FSWatcher } from "node:fs";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext, WidgetPlacement } from "@earendil-works/pi-coding-agent";
 import type { ModelScopeConfig } from "../runs/shared/model-scope.ts";
 
 // ============================================================================
@@ -898,6 +898,13 @@ export interface SubagentState {
 		schedule(file: string, delayMs?: number): boolean;
 		clear(): void;
 	};
+	/**
+	 * Set by fleet-dock-wiring.ts (PHASE-04) when the legacy async widget must
+	 * stay hidden for the whole session (FleetView active, or ui.asyncWidget
+	 * explicitly false) - checked live by async-job-tracker.ts's rerenderWidget()
+	 * on every call, not just once after a tool_result event.
+	 */
+	suppressAsyncWidget?: boolean;
 }
 
 // ============================================================================
@@ -1034,6 +1041,12 @@ export interface SubagentUiConfig {
 	 * turn it off to keep each tool to one visible history trace.
 	 */
 	showAsyncWidget?: boolean;
+	/** Show the asynchronous-job widget. Takes precedence over showAsyncWidget when set. */
+	asyncWidget?: boolean;
+	/** Enable the interactive Fleet Status Dock (PHASE-04). Defaults to false. */
+	fleetView?: boolean;
+	/** Placement of the Fleet Status Dock widget. Defaults to "belowEditor". */
+	fleetViewPlacement?: WidgetPlacement;
 }
 
 export interface ExtensionConfig {
@@ -1143,6 +1156,7 @@ export const ASYNC_DIR = path.join(TEMP_ROOT_DIR, "async-subagent-runs");
 export const CHAIN_RUNS_DIR = path.join(TEMP_ROOT_DIR, "chain-runs");
 export const TEMP_ARTIFACTS_DIR = path.join(TEMP_ROOT_DIR, "artifacts");
 export const WIDGET_KEY = "subagent-async";
+export const FLEET_DOCK_WIDGET_KEY = "subagent-fleet-dock";
 export const SLASH_RESULT_TYPE = "subagent-slash-result";
 export const SLASH_TEXT_RESULT_TYPE = "subagent-slash-text-result";
 export const SLASH_SUBAGENT_REQUEST_EVENT = "subagent:slash:request";

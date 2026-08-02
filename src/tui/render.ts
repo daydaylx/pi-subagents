@@ -49,7 +49,7 @@ const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
  * 
  * Uses Intl.Segmenter for proper Unicode/emoji handling (not char-by-char).
  */
-function truncLine(text: string, maxWidth: number): string {
+export function truncLine(text: string, maxWidth: number): string {
 	if (visibleWidth(text) <= maxWidth) return text;
 
 	const targetWidth = maxWidth - 1;
@@ -228,7 +228,7 @@ function buildLiveStatusLine(progress: Pick<AgentProgress, "activityState" | "la
 	return undefined;
 }
 
-function themeBold(theme: Theme, text: string): string {
+export function themeBold(theme: Theme, text: string): string {
 	return ((theme as { bold?: (value: string) => string }).bold?.(text)) ?? text;
 }
 
