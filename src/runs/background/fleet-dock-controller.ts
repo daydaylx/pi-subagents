@@ -320,6 +320,9 @@ export class FleetDockController {
 					maxRows: this.maxRows(),
 					now: this.now(),
 					stopArmedKey: this.stopArmedKey,
+					// PHASE-08: nur mit Tastaturfokus wird die Tastenkuerzelzeile
+					// gerendert (siehe fleet-dock.ts).
+					active: this.active,
 				});
 			},
 			invalidate: () => {},

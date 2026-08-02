@@ -290,6 +290,89 @@ or ask:
 Check whether subagents and intercom are set up correctly.
 ```
 
+## Fleet Status Dock
+
+The Fleet Status Dock is an interactive, always-visible list of the agents that are running right now. It replaces the compact async widget with one concrete line per agent - foreground, async, parallel, chain and nested runs all appear in the same list - and opens a detail inspector with the live transcript.
+
+It is off by default. Enable it in `~/.pi/agent/extensions/subagent/config.json`:
+
+```json
+{ "ui": { "fleetView": true, "fleetViewPlacement": "belowEditor", "asyncWidget": false } }
+```
+
+`fleetView: true` already suppresses the old async widget on its own. Setting `asyncWidget: false` makes that explicit and keeps the widget hidden regardless.
+
+### What a line shows
+
+While the dock holds the keyboard focus, with `worker` selected (120 columns):
+
+```text
+  AGENTS · 4 active · 1 needs attention
+  ⚠ reviewer                 · watchdog: stalled · 18.0s · 7.4k
+› ● worker                   · tool: edit (…/plan-mode/index.ts) · 42.0s · 18k
+  ● scout                    · tool: grep · 9.0s · 3.1k
+  ‖ implementation-planner   · paused · waiting: supervisor decision · 2m10s · 12k
+  ✓ oracle                   · done · 4m0s · 41k
+  ↑↓ select · enter inspect · s stop · esc back
+```
+
+The counter in the header counts only agents that are still going, so the
+finished `oracle` is listed but not counted. Without the keyboard focus the
+shortcut line is not shown at all and the header ends in `· ↓ select` instead:
+
+```text
+  AGENTS · 4 active · 1 needs attention · ↓ select
+```
+
+Every state has its own glyph, so status never depends on color alone:
+
+| Glyph | State | Meaning |
+| ----- | ----- | ------- |
+| `●` | `running` | working |
+| `⚠` | `needs_attention` | waiting for you, a watchdog escalation, or a pending supervisor decision |
+| `‖` | `paused` | paused |
+| `✓` | `completed` | finished successfully |
+| `✗` | `error` | failed |
+| `■` | `stopped` | stopped through the control channel |
+
+The selected line is marked three ways at once: a `›` prefix, the accent color, and bold text. Agent names sit in a fixed-width column that scales with the terminal (16 columns at 80, 24 at 120 and above), so the status columns do not move when an agent name or a runtime changes. At the supported widths the runtime and token counts are never truncated - a long activity description is shortened first, and paths inside it collapse to their last two segments (`…/plan-mode/index.ts`). Below roughly 45 columns there is no budget left to shorten anything into, and the line is simply cut at the right edge.
+
+At most six agents are listed at once; the rest are summarized in a trailing counter line. Finished entries disappear automatically five minutes after their last update.
+
+The dock renders purely from the current state. There is no spinner, ticker, or other animation, and no permanent box drawn around it.
+
+### Keyboard shortcuts
+
+The dock only takes keyboard input while the editor is empty. Press `↓` on an empty editor to focus it; typing anything releases the focus again. The shortcut line at the bottom of the dock is shown only while it holds focus, and lists only the shortcuts that actually apply to the selected entry.
+
+| Key | Where | Action |
+| --- | ----- | ------ |
+| `↓` | empty editor | focus the dock |
+| `↑` / `↓` | dock | move the selection |
+| `Enter` | dock | open the inspector for the selected agent |
+| `s` | dock, inspector | arm a stop; press `s` again to confirm, any other key cancels |
+| `d` | dock | dismiss a finished top-level entry |
+| `Esc` | dock | release the keyboard focus |
+| `↑` / `↓` | inspector | scroll the transcript (auto-follows the tail until you scroll up) |
+| `PgUp` / `PgDn` | inspector | scroll the transcript by a page |
+| `Home` / `End` | inspector | jump to the start or the tail of the transcript |
+| `Space` | inspector | expand or collapse tool results |
+| `Esc` | inspector | close the inspector; the dock keeps its focus |
+
+`Enter` is swallowed while the inspector is open - it is reserved for drilling into a child run and currently does nothing, but it must not reach the editor behind the inspector. The shortcut line at the bottom of the inspector is a reminder of the most-used keys, not the full list; `Home` and `End` are not repeated there to keep it inside 80 columns.
+
+`s` only offers itself for async runs that can actually be stopped, and it uses the same file-based stop channel as `/subagents-stop`, so the run is persisted as `stopped` instead of as a timeout. There is no stop for foreground or nested runs - those only support interrupt, which pauses rather than terminates. `d` only applies to finished top-level entries; it hides the entry locally and never rewrites `status.json` or any other artifact.
+
+### Going back to the old widget
+
+The dock is additive - the previous async widget is untouched and remains the fallback:
+
+```json
+{ "ui": { "fleetView": false, "asyncWidget": true } }
+```
+
+Restart the session (or reload the extension) after changing the config. With `fleetView: false` nothing belonging to the dock is registered at all - no widget, no input handler, no timer - and the async widget behaves exactly as it did before.
+
 ## Recommended orchestration pattern (scaffolding)
 
 Use orchestration as parent-agent guidance, not as a runtime workflow mode. For implementation work, the recommended loop is:
@@ -1208,6 +1291,30 @@ After a worktree parallel step completes, per-agent diff stats are appended to t
 ```
 
 Hides the persistent async-subagent widget while preserving background lifecycle tracking, completion notifications, and `subagent({ action: "status" })`. The widget remains enabled by default for backward compatibility.
+
+### `ui.fleetView`
+
+```json
+{ "ui": { "fleetView": true } }
+```
+
+Enables the interactive Fleet Status Dock and, while it is active, suppresses the old async widget. Defaults to `false`. See [Fleet Status Dock](#fleet-status-dock) for the full description, the keyboard shortcuts, and the fallback path.
+
+### `ui.fleetViewPlacement`
+
+```json
+{ "ui": { "fleetViewPlacement": "belowEditor" } }
+```
+
+Where the Fleet Status Dock widget is placed. Defaults to `"belowEditor"`; the same placement is used for the inspector.
+
+### `ui.asyncWidget`
+
+```json
+{ "ui": { "asyncWidget": false } }
+```
+
+Hides the async widget. Takes precedence over `ui.showAsyncWidget` when set. Only the hiding direction is implemented: `asyncWidget: false` reliably hides the widget, while `asyncWidget: true` does not force it back on if `ui.showAsyncWidget` is `false`.
 
 ### `toolDescriptionMode`
 

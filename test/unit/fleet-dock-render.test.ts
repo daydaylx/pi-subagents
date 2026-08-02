@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { FleetAgentEntry, FleetAgentState } from "../../src/runs/shared/fleet-projection.ts";
-import { MAX_DOCK_ROWS, renderFleetDock, sortFleetEntries } from "../../src/tui/fleet-dock.ts";
+import { compactActivityDetail, compactPath, MAX_DOCK_ROWS, nameColumnWidth, renderFleetDock, sortFleetEntries } from "../../src/tui/fleet-dock.ts";
 
 function stripAnsi(text: string): string {
 	// eslint-disable-next-line no-control-regex
@@ -84,14 +84,15 @@ describe("renderFleetDock", () => {
 	it("caps visible rows and reports the remainder as a hint", () => {
 		const entries = Array.from({ length: MAX_DOCK_ROWS + 3 }, (_, i) => makeEntry({ key: `r${i}`, state: "running", agent: `agent-${i}`, updatedAt: i }));
 		const lines = renderFleetDock(entries, undefined, { width: 80, theme: makeTheme(), now: 0 });
-		assert.equal(lines.length, MAX_DOCK_ROWS + 1);
+		// PHASE-08: 1 Kopfzeile + MAX_DOCK_ROWS Eintraege + 1 "+N weitere"-Zeile.
+		assert.equal(lines.length, MAX_DOCK_ROWS + 2);
 		assert.match(stripAnsi(lines.at(-1)!), /\+3 weitere/);
 	});
 
 	it("includes activityDetail and token stats in the entry line", () => {
 		const entries = [makeEntry({ key: "a", state: "running", agent: "alpha", activityDetail: "tool: bash", tokens: 1500, startedAt: 0 })];
 		const lines = renderFleetDock(entries, undefined, { width: 200, theme: makeTheme(), now: 5000 });
-		const line = stripAnsi(lines[0]!);
+		const line = stripAnsi(lines.find((candidate) => candidate.includes("alpha"))!);
 		assert.match(line, /tool: bash/);
 		assert.match(line, /1\.5k/);
 	});
@@ -167,5 +168,181 @@ describe("renderFleetDock", () => {
 		const betaIdx = lines.findIndex((line) => line.includes("beta"));
 		const afterBeta = lines[betaIdx + 1];
 		assert.ok(afterBeta === undefined || !stripAnsi(afterBeta).includes("Stop bestaetigen"));
+	});
+});
+
+describe("renderFleetDock: Aurora-Politur (PHASE-08)", () => {
+	it("renders a header line with active and needs-attention counts", () => {
+		const entries = [
+			makeEntry({ key: "a", state: "running", agent: "alpha" }),
+			makeEntry({ key: "b", state: "needs_attention", agent: "beta", needsAttention: true, updatedAt: -1 }),
+			makeEntry({ key: "c", state: "completed", agent: "gamma", updatedAt: -2 }),
+		];
+		const header = stripAnsi(renderFleetDock(entries, undefined, { width: 120, theme: makeTheme(), now: 0 })[0]!);
+		assert.match(header, /AGENTS/);
+		// completed zaehlt nicht als "active"
+		assert.match(header, /2 active/);
+		assert.match(header, /1 needs attention/);
+	});
+
+	it("omits the needs-attention counter when nothing needs attention", () => {
+		const entries = [makeEntry({ key: "a", state: "running", agent: "alpha" })];
+		const header = stripAnsi(renderFleetDock(entries, undefined, { width: 120, theme: makeTheme(), now: 0 })[0]!);
+		assert.doesNotMatch(header, /needs attention/);
+	});
+
+	it("shows the down-arrow affordance only while the dock has no keyboard focus", () => {
+		const entries = [makeEntry({ key: "a", state: "running", agent: "alpha" })];
+		const idle = stripAnsi(renderFleetDock(entries, "a", { width: 120, theme: makeTheme(), now: 0 })[0]!);
+		const focused = stripAnsi(renderFleetDock(entries, "a", { width: 120, theme: makeTheme(), now: 0, active: true })[0]!);
+		assert.match(idle, /\u2193 select/);
+		assert.doesNotMatch(focused, /\u2193 select/);
+	});
+
+	it("renders the shortcut hint line only while the dock has keyboard focus", () => {
+		const entries = [makeEntry({ key: "a", state: "running", agent: "alpha" })];
+		const idle = renderFleetDock(entries, "a", { width: 120, theme: makeTheme(), now: 0 }).map(stripAnsi).join("\n");
+		const focused = renderFleetDock(entries, "a", { width: 120, theme: makeTheme(), now: 0, active: true }).map(stripAnsi).join("\n");
+		assert.doesNotMatch(idle, /enter inspect/);
+		assert.match(focused, /\u2191\u2193 select/);
+		assert.match(focused, /enter inspect/);
+		assert.match(focused, /esc back/);
+	});
+
+	it("advertises 's stop' and 'd dismiss' only when they apply to the selected entry", () => {
+		const entries = [
+			makeEntry({ key: "a", state: "running", agent: "alpha", source: "async", canStop: true, asyncDir: "/tmp/a" }),
+			makeEntry({ key: "b", state: "completed", agent: "beta", source: "async", canStop: false, updatedAt: -1 }),
+		];
+		const onStoppable = renderFleetDock(entries, "a", { width: 120, theme: makeTheme(), now: 0, active: true }).map(stripAnsi).join("\n");
+		const onTerminal = renderFleetDock(entries, "b", { width: 120, theme: makeTheme(), now: 0, active: true }).map(stripAnsi).join("\n");
+		assert.match(onStoppable, /s stop/);
+		assert.doesNotMatch(onStoppable, /d dismiss/);
+		assert.doesNotMatch(onTerminal, /s stop/);
+		assert.match(onTerminal, /d dismiss/);
+	});
+
+	it("gives every state its own glyph so status is never conveyed by color alone", () => {
+		const states: FleetAgentState[] = ["needs_attention", "running", "paused", "completed", "error", "stopped"];
+		const glyphs = states.map((state) => {
+			const lines = renderFleetDock([makeEntry({ key: state, state })], undefined, { width: 120, theme: makeTheme(), now: 0 });
+			return stripAnsi(lines[1]!).trimStart()[0]!;
+		});
+		assert.equal(new Set(glyphs).size, states.length, `glyphs are not unique: ${glyphs.join(" ")}`);
+	});
+
+	it("spells out non-running states as text without duplicating the projection fallback", () => {
+		const stoppedLines = renderFleetDock([makeEntry({ key: "a", state: "stopped", agent: "alpha", activityDetail: "stopped" })], undefined, {
+			width: 120,
+			theme: makeTheme(),
+			now: 0,
+		});
+		const stopped = stripAnsi(stoppedLines[1]!);
+		assert.match(stopped, /stopped/);
+		assert.equal(stopped.match(/stopped/g)!.length, 1);
+
+		const pausedLines = renderFleetDock([makeEntry({ key: "b", state: "paused", agent: "beta", activityDetail: "tool: bash" })], undefined, {
+			width: 120,
+			theme: makeTheme(),
+			now: 0,
+		});
+		const paused = stripAnsi(pausedLines[1]!);
+		assert.match(paused, /paused/);
+		assert.match(paused, /tool: bash/);
+	});
+
+	it("aligns the status columns on a fixed name column so they do not jump between entries", () => {
+		const entries = [
+			makeEntry({ key: "a", state: "running", agent: "ab", activityDetail: "tool: bash" }),
+			makeEntry({ key: "b", state: "running", agent: "a-much-longer-name", activityDetail: "tool: bash", updatedAt: -1 }),
+		];
+		const rows = renderFleetDock(entries, undefined, { width: 120, theme: makeTheme(), now: 0 }).slice(1, 3).map(stripAnsi);
+		const columns = rows.map((line) => line.indexOf("tool: bash"));
+		assert.ok(columns[0]! > 0, "activity column not found");
+		assert.equal(columns[0], columns[1]);
+	});
+
+	it("keeps runtime and token stats intact at 80 columns and shortens the activity instead", () => {
+		const entries = [
+			makeEntry({
+				key: "a",
+				state: "running",
+				agent: "alpha",
+				activityDetail: "tool: edit (/home/user/project/src/deeply/nested/module/file.ts)",
+				tokens: 18200,
+				startedAt: 0,
+			}),
+		];
+		const line = stripAnsi(renderFleetDock(entries, undefined, { width: 80, theme: makeTheme(), now: 42000 })[1]!);
+		assert.ok(line.length <= 80, `line too long: ${JSON.stringify(line)}`);
+		assert.match(line, /42\.0s/);
+		assert.match(line, /18k/);
+	});
+
+	it("shortens embedded paths to their last segments instead of cutting them off", () => {
+		assert.equal(compactPath("/home/user/project/src/plan-mode/index.ts"), "\u2026/plan-mode/index.ts");
+		assert.equal(compactPath("index.ts"), "index.ts");
+		assert.equal(compactActivityDetail("tool: edit (/a/b/c/d.ts)"), "tool: edit (\u2026/c/d.ts)");
+		assert.equal(compactActivityDetail("tool: bash"), "tool: bash");
+	});
+
+	it("survives a state value outside the six known ones instead of throwing", () => {
+		const entries = [makeEntry({ key: "a", state: "zombie" as FleetAgentState, agent: "alpha" })];
+		const lines = renderFleetDock(entries, undefined, { width: 120, theme: makeTheme(), now: 0 });
+		assert.equal(lines.length, 2);
+		assert.match(stripAnsi(lines[1]!), /alpha/);
+	});
+
+	it("does not emit a doubled separator for an empty activity detail", () => {
+		const entries = [makeEntry({ key: "a", state: "running", agent: "alpha", activityDetail: "" })];
+		const line = stripAnsi(renderFleetDock(entries, undefined, { width: 120, theme: makeTheme(), now: 0 })[1]!);
+		assert.doesNotMatch(line, /·\s+·/);
+	});
+
+	it("still shortens embedded paths when the budget is too small for a fitted detail", () => {
+		const entries = [
+			makeEntry({ key: "a", state: "running", agent: "alpha", activityDetail: "tool: edit (/home/user/project/src/plan-mode/index.ts)" }),
+		];
+		const line = stripAnsi(renderFleetDock(entries, undefined, { width: 40, theme: makeTheme(), now: 0 })[1]!);
+		assert.ok(line.length <= 40, `line too long: ${JSON.stringify(line)}`);
+		assert.doesNotMatch(line, /home\/user\/project/, "raw path leaked into a narrow line");
+	});
+
+	it("exposes a stable name column width for the supported terminal widths", () => {
+		assert.equal(nameColumnWidth(80), 16);
+		assert.equal(nameColumnWidth(120), 24);
+		assert.equal(nameColumnWidth(160), 24);
+	});
+
+	it("keeps every line within bounds at 80/120/160 columns including header, hint and detail lines", () => {
+		const entries = [
+			makeEntry({
+				key: "a",
+				state: "needs_attention",
+				agent: "alpha",
+				needsAttention: true,
+				activityDetail: "watchdog: stalled after a long running tool call",
+				source: "async",
+				canStop: true,
+				asyncDir: "/tmp/a",
+			}),
+			makeEntry({
+				key: "b",
+				state: "completed",
+				agent: "a-really-long-agent-name-here",
+				activityDetail: "tool: edit (/home/user/project/src/very/deep/file.ts)",
+				transcriptPath: "/home/user/.pi/agent/async/run-1/transcript.jsonl",
+				updatedAt: -1,
+			}),
+		];
+		for (const width of [80, 120, 160]) {
+			const lines = renderFleetDock(entries, "a", { width, theme: makeTheme(), now: 60000, active: true, expandedKey: "b" });
+			for (const line of lines) {
+				assert.ok(stripAnsi(line).length <= width, `line too long at width ${width}: ${JSON.stringify(stripAnsi(line))}`);
+			}
+			const rendered = lines.map(stripAnsi).join("\n");
+			assert.match(rendered, /AGENTS/, `header missing at width ${width}`);
+			assert.match(rendered, /alpha/, `agent name truncated away at width ${width}`);
+		}
 	});
 });

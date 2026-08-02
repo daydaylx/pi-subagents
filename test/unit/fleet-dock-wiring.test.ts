@@ -118,6 +118,31 @@ describe("createFleetDockWiring - disabled", () => {
 	});
 });
 
+describe("createFleetDockWiring - documented fallback configuration (PHASE-08)", () => {
+	// Exakt die in README.md dokumentierte Rueckfallkonfiguration:
+	// { "ui": { "fleetView": false, "asyncWidget": true } }. Die Zusage lautet:
+	// nichts vom Dock wird registriert (kein Widget, kein Input-Handler, kein
+	// Timer) UND das alte Async-Widget bleibt unangetastet, d.h. es wird weder
+	// versteckt noch wird state.suppressAsyncWidget gesetzt.
+	it("registers nothing of the dock and leaves the old async widget fully intact", () => {
+		const state = makeState({ asyncJobs: new Map([["async-1", makeAsyncJobState()]]) });
+		const wiring = createFleetDockWiring(state, { ui: { fleetView: false, asyncWidget: true } } as ExtensionConfig);
+		assert.equal(wiring.fleetViewEnabled, false);
+
+		const { ctx, fake } = makeCtx();
+		wiring.onSessionStart(ctx as never);
+		wiring.onToolResult(ctx as never);
+
+		assert.equal(fake.setWidgetCalls.length, 0, "no widget of any kind may be registered or cleared");
+		assert.equal(fake.terminalInputSubscriptions, 0, "no terminal input handler may be installed");
+		assert.equal(fake.requestRenderCalls, 0, "no render may be forced");
+		assert.ok(!state.suppressAsyncWidget, "the old async widget must not be suppressed");
+
+		wiring.dispose();
+		assert.equal(fake.setWidgetCalls.length, 0, "dispose() must stay a no-op as well");
+	});
+});
+
 describe("createFleetDockWiring - asyncWidget precedence (fleetView off)", () => {
 	it("hides the old async widget when ui.asyncWidget is explicitly false, even without fleetView", () => {
 		const wiring = createFleetDockWiring(makeState(), { ui: { asyncWidget: false } } as ExtensionConfig);

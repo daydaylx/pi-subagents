@@ -13,7 +13,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { formatDuration, formatTokens } from "../shared/formatters.ts";
 import type { FleetAgentEntry, FleetAttentionReason } from "../runs/shared/fleet-projection.ts";
 import type { TranscriptEvent } from "../runs/shared/fleet-transcript-reader.ts";
-import { entryLine, stateGlyph } from "./fleet-dock.ts";
+import { compactActivityDetail, entryLine, stateGlyph } from "./fleet-dock.ts";
 import { modelThinkingBadge, statJoin, themeBold, truncLine } from "./render.ts";
 
 type Theme = ExtensionContext["ui"]["theme"];
@@ -115,7 +115,9 @@ export function renderFleetInspector(
 		entry.turnCount !== undefined ? `${entry.turnCount} turns` : "",
 		entry.toolCount !== undefined ? `${entry.toolCount} tools` : "",
 		tokenTotal !== undefined ? `${formatTokens(tokenTotal)} tok` : "",
-		entry.activityDetail ?? "",
+		// PHASE-08: gleiche Pfadkuerzung wie im Dock, damit Dock- und
+		// Inspector-Statuszeile identisch aussehen.
+		entry.activityDetail !== undefined ? compactActivityDetail(entry.activityDetail) : "",
 	]);
 	if (statsLine) lines.push(truncLine(statsLine, width));
 
