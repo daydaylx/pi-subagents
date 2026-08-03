@@ -93,6 +93,7 @@ import { waitForImportedAsyncRoot } from "./chain-root-attachment.ts";
 import { appendRunnerStepsToStatus, consumeChainAppendRequests, countPendingChainAppendRequests } from "./chain-append.ts";
 import { appendTurnBudgetSystemPrompt, formatTurnBudgetOutput, initialTurnBudgetState, shouldAbortForTurnBudget, turnBudgetExceededMessage, turnBudgetSoftNote, turnBudgetState } from "../shared/turn-budget.ts";
 import { initialToolBudgetState, toolBudgetState } from "../shared/tool-budget.ts";
+import { resolveTimeBudget } from "../shared/time-budget.ts";
 import { resolveWatchdogConfig } from "../../watchdog/settings.ts";
 import {
 	CHILD_WATCHDOG_CONFIG_ENV,
@@ -871,6 +872,8 @@ interface SingleStepContext {
 	timeoutMessage?: string;
 	stopMessage?: string;
 	turnBudget?: ResolvedTurnBudget;
+	timeoutMs?: number;
+	deadlineAt?: number;
 	childIntercomTarget?: string;
 	orchestratorIntercomTarget?: string;
 	nestedRoute?: NestedRouteInfo;
@@ -1082,6 +1085,7 @@ async function runSingleStep(
 			steerInboxDir: ctx.steerInboxDir,
 			structuredOutput: effectiveStructuredOutput,
 			toolBudget: step.toolBudget,
+			timeBudget: resolveTimeBudget(ctx),
 			childWatchdog,
 		});
 		const run = await runPiStreaming(
@@ -2585,6 +2589,8 @@ async function runSubagent(config: SubagentRunConfig): Promise<void> {
 					timeoutMessage,
 					stopMessage,
 					turnBudget: config.turnBudget,
+					timeoutMs: config.timeoutMs,
+					deadlineAt: config.deadlineAt,
 					onAttemptStart: (attempt) => updateStepModel(fi, attempt.model, attempt.thinking),
 					onChildEvent: (event) => updateStepFromChildEvent(fi, event),
 					skipAcceptance: () => timedOut || stopped,
@@ -2884,6 +2890,8 @@ async function runSubagent(config: SubagentRunConfig): Promise<void> {
 							timeoutMessage,
 							stopMessage,
 							turnBudget: config.turnBudget,
+							timeoutMs: config.timeoutMs,
+							deadlineAt: config.deadlineAt,
 							onAttemptStart: (attempt) => updateStepModel(fi, attempt.model, attempt.thinking),
 							onChildEvent: (event) => updateStepFromChildEvent(fi, event),
 							skipAcceptance: () => timedOut || stopped,
@@ -3089,6 +3097,8 @@ async function runSubagent(config: SubagentRunConfig): Promise<void> {
 				timeoutMessage,
 				stopMessage,
 				turnBudget: config.turnBudget,
+				timeoutMs: config.timeoutMs,
+				deadlineAt: config.deadlineAt,
 				onAttemptStart: (attempt) => updateStepModel(flatIndex, attempt.model, attempt.thinking),
 				onChildEvent: (event) => updateStepFromChildEvent(flatIndex, event),
 				skipAcceptance: () => timedOut || stopped,

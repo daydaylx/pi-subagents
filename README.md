@@ -1201,7 +1201,7 @@ Agent definitions are not loaded into context by default. Management actions let
 | `clarify` | boolean | false | Show TUI preview/edit flow. Explicit `clarify: true` keeps the run foreground for the clarify UI. |
 | `agentScope` | `user \| project \| both` | `both` | Agent discovery scope. Project wins on collisions. |
 | `async` | boolean | false | Background execution. For chains, `clarify: true` explicitly keeps the run foreground for the clarify UI. |
-| `timeoutMs` / `maxRuntimeMs` | number | none | Optional run-level max runtime in milliseconds for foreground and async/background runs. |
+| `timeoutMs` / `maxRuntimeMs` | number | none | Optional run-level max runtime in milliseconds for foreground and async/background runs. Once elapsed time reaches 80% of this budget, the child is nudged once to stop starting new long-running commands (e.g. a full test/verify suite) and finalize from what it already has; the parent-side hard timeout remains authoritative and still ends the run at 100%. |
 | `turnBudget` | object | none | Optional assistant-turn budget `{ maxTurns, graceTurns }`. At `maxTurns` the child is warned to wrap up; after `graceTurns` (default 1) more assistant turns the run is aborted and partial output is returned. |
 | `toolBudget` | object | none | Optional child tool-call budget `{ soft?, hard, block? }`. At `soft` the child is nudged to finalize. After `hard`, configured tools are blocked; `block` defaults to `read`, `grep`, `find`, and `ls`, or use `"*"` to block every tool call. Final assistant text is never blocked. |
 | `cwd` | string | runtime cwd | Override working directory. |

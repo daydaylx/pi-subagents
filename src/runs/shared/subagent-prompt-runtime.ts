@@ -6,6 +6,7 @@ import { consumeSteerRequestsFromDir, writeSteerRequestToDir, type SteerRequest 
 import { SUBAGENT_FANOUT_CHILD_ENV, SUBAGENT_STEER_INBOX_ENV } from "./pi-args.ts";
 import { STRUCTURED_OUTPUT_CAPTURE_ENV, STRUCTURED_OUTPUT_SCHEMA_ENV, validateStructuredOutputValue } from "./structured-output.ts";
 import { TOOL_BUDGET_ENV, decodeToolBudgetEnv, shouldBlockToolForBudget, toolBudgetBlockedMessage, toolBudgetSoftNudge } from "./tool-budget.ts";
+import { TIME_BUDGET_ENV, decodeTimeBudgetEnv, shouldNudgeForTimeBudget, timeBudgetSoftNudge } from "./time-budget.ts";
 import type { JsonSchemaObject, ResolvedToolBudget } from "../../shared/types.ts";
 import { registerChildWatchdog } from "../../watchdog/register-child.ts";
 import { SUBAGENT_WATCHDOG_WARNING_TYPE } from "../../watchdog/types.ts";
@@ -192,6 +193,23 @@ function registerToolBudget(pi: ExtensionAPI, budget: ResolvedToolBudget | undef
 	});
 }
 
+function registerTimeBudget(pi: ExtensionAPI, budget: ReturnType<typeof decodeTimeBudgetEnv>): void {
+	if (!budget) return;
+	let softNudged = false;
+	const sendUserMessage = (pi as { sendUserMessage?: (content: string, options: { deliverAs: "steer" }) => unknown }).sendUserMessage;
+	const onRuntimeEvent = pi.on as unknown as (event: string, handler: () => unknown) => void;
+	onRuntimeEvent("tool_call", () => {
+		if (softNudged || !shouldNudgeForTimeBudget(Date.now(), budget)) return undefined;
+		softNudged = true;
+		try {
+			sendUserMessage?.(timeBudgetSoftNudge(Date.now(), budget), { deliverAs: "steer" });
+		} catch {
+			// Budget nudges are advisory; the parent-side hard timeout remains authoritative.
+		}
+		return undefined;
+	});
+}
+
 function registerSteeringInbox(pi: ExtensionAPI): void {
 	const steerInbox = process.env[SUBAGENT_STEER_INBOX_ENV]?.trim();
 	if (!steerInbox) return;
@@ -263,6 +281,7 @@ function registerSteeringInbox(pi: ExtensionAPI): void {
 export default function registerSubagentPromptRuntime(pi: ExtensionAPI): void {
 	registerSteeringInbox(pi);
 	registerToolBudget(pi, decodeToolBudgetEnv(process.env[TOOL_BUDGET_ENV]));
+	registerTimeBudget(pi, decodeTimeBudgetEnv(process.env[TIME_BUDGET_ENV]));
 	registerChildWatchdog(pi);
 	let nativeSupervisorClientRegistered = false;
 	let nativeSupervisorFallbackRegistered = false;

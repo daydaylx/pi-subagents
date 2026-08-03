@@ -71,6 +71,7 @@ import {
 import { acceptanceFailureMessage, evaluateAcceptance, formatAcceptancePrompt, resolveEffectiveAcceptance, stripAcceptanceReport } from "../shared/acceptance.ts";
 import { appendTurnBudgetSystemPrompt, formatTurnBudgetOutput, initialTurnBudgetState, shouldAbortForTurnBudget, turnBudgetExceededMessage, turnBudgetSoftNote, turnBudgetState } from "../shared/turn-budget.ts";
 import { initialToolBudgetState, toolBudgetState } from "../shared/tool-budget.ts";
+import { resolveTimeBudget } from "../shared/time-budget.ts";
 import { resolveWatchdogConfig } from "../../watchdog/settings.ts";
 import {
 	acceptChildWatchdogEvent,
@@ -235,6 +236,7 @@ async function runSingleAttempt(
 		parentSessionId: options.parentSessionId,
 		structuredOutput: options.structuredOutput,
 		toolBudget: options.toolBudget,
+		timeBudget: resolveTimeBudget(options),
 		childWatchdog,
 	});
 
