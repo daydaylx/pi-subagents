@@ -304,24 +304,24 @@ It is off by default. Enable it in `~/.pi/agent/extensions/subagent/config.json`
 
 ### What a line shows
 
-While the dock holds the keyboard focus, with `worker` selected (120 columns):
+While the dock holds the keyboard focus, with `worker` selected and `scout` running as its child (120 columns):
 
 ```text
   AGENTS · 4 active · 1 needs attention
-  ⚠ reviewer                 · watchdog: stalled · 18.0s · 7.4k
-› ● worker                   · tool: edit (…/plan-mode/index.ts) · 42.0s · 18k
-  ● scout                    · tool: grep · 9.0s · 3.1k
-  ‖ implementation-planner   · paused · waiting: supervisor decision · 2m10s · 12k
-  ✓ oracle                   · done · 4m0s · 41k
+  ⚠ reviewer                  watchdog: stalled                                                            18.0s ·  7.4k
+› ● worker                    tool: edit (…/plan-mode/index.ts)                                            42.0s ·   18k
+    ● scout                     tool: grep                                                                  9.0s ·  3.1k
+  ‖ implementation-planner    paused · waiting: supervisor decision                                        2m10s ·   12k
+  ✓ oracle                    done                                                                          4m0s ·   41k
   ↑↓ select · enter inspect · s stop · esc back
 ```
 
 The counter in the header counts only agents that are still going, so the
 finished `oracle` is listed but not counted. Without the keyboard focus the
-shortcut line is not shown at all and the header ends in `· ↓ select` instead:
+shortcut line is not shown at all and the header ends in `· ↓ select · Super+↓ jump` instead:
 
 ```text
-  AGENTS · 4 active · 1 needs attention · ↓ select
+  AGENTS · 4 active · 1 needs attention · ↓ select · Super+↓ jump
 ```
 
 Every state has its own glyph, so status never depends on color alone:
@@ -335,7 +335,7 @@ Every state has its own glyph, so status never depends on color alone:
 | `✗` | `error` | failed |
 | `■` | `stopped` | stopped through the control channel |
 
-The selected line is marked three ways at once: a `›` prefix, the accent color, and bold text. Agent names sit in a fixed-width column that scales with the terminal (16 columns at 80, 24 at 120 and above), so the status columns do not move when an agent name or a runtime changes. At the supported widths the runtime and token counts are never truncated - a long activity description is shortened first, and paths inside it collapse to their last two segments (`…/plan-mode/index.ts`). Below roughly 45 columns there is no budget left to shorten anything into, and the line is simply cut at the right edge.
+The selected line is marked three ways at once: a `›` prefix, the accent color, and bold text. Agent names sit in a fixed-width column that scales with the terminal (16 columns at 80, 24 at 120 and above), so the status columns do not move when an agent name or a runtime changes. Runtime and token counts sit in their own fixed-width, right-aligned column at the end of every line, so their digits line up vertically regardless of how long the activity description in front of them is - a long description is shortened first, and paths inside it collapse to their last two segments (`…/plan-mode/index.ts`), never the runtime or tokens. A nested agent (spawned by another one, like `scout` above) is indented two spaces per nesting level relative to its parent, so the hierarchy is visible in the dock itself, not only in the inspector's `children:` list. Below roughly 45 columns there is no budget left to shorten anything into, and the line is simply cut at the right edge.
 
 At most six agents are listed at once; the rest are summarized in a trailing counter line. Finished entries disappear automatically five minutes after their last update.
 
@@ -343,11 +343,12 @@ The dock renders purely from the current state. There is no spinner, ticker, or 
 
 ### Keyboard shortcuts
 
-The dock only takes keyboard input while the editor is empty. Press `↓` on an empty editor to focus it; typing anything releases the focus again. The shortcut line at the bottom of the dock is shown only while it holds focus, and lists only the shortcuts that actually apply to the selected entry.
+The dock only takes keyboard input while the editor is empty, or any time at all via `Super+↓`. Press `↓` on an empty editor, or `Super+↓` regardless of what is in the editor, to focus the dock; changing the editor's text afterwards releases the focus again (measured against whatever the editor held at the moment of activation, so pre-existing text from a `Super+↓` jump does not immediately release it on the very next key). The shortcut line at the bottom of the dock is shown only while it holds focus, and lists only the shortcuts that actually apply to the selected entry.
 
 | Key | Where | Action |
 | --- | ----- | ------ |
 | `↓` | empty editor | focus the dock |
+| `Super+↓` | anywhere | focus the dock, even while the editor has text |
 | `↑` / `↓` | dock | move the selection |
 | `Enter` | dock | open the inspector for the selected agent |
 | `s` | dock, inspector | arm a stop; press `s` again to confirm, any other key cancels |

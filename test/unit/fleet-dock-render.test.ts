@@ -199,6 +199,14 @@ describe("renderFleetDock: Aurora-Politur (PHASE-08)", () => {
 		assert.doesNotMatch(focused, /\u2193 select/);
 	});
 
+	it("advertises the super+down jump only while the dock has no keyboard focus (PHASE-09)", () => {
+		const entries = [makeEntry({ key: "a", state: "running", agent: "alpha" })];
+		const idle = stripAnsi(renderFleetDock(entries, "a", { width: 120, theme: makeTheme(), now: 0 })[0]!);
+		const focused = stripAnsi(renderFleetDock(entries, "a", { width: 120, theme: makeTheme(), now: 0, active: true })[0]!);
+		assert.match(idle, /Super\+↓ jump/);
+		assert.doesNotMatch(focused, /Super\+↓ jump/);
+	});
+
 	it("renders the shortcut hint line only while the dock has keyboard focus", () => {
 		const entries = [makeEntry({ key: "a", state: "running", agent: "alpha" })];
 		const idle = renderFleetDock(entries, "a", { width: 120, theme: makeTheme(), now: 0 }).map(stripAnsi).join("\n");
@@ -343,6 +351,55 @@ describe("renderFleetDock: Aurora-Politur (PHASE-08)", () => {
 			const rendered = lines.map(stripAnsi).join("\n");
 			assert.match(rendered, /AGENTS/, `header missing at width ${width}`);
 			assert.match(rendered, /alpha/, `agent name truncated away at width ${width}`);
+		}
+	});
+});
+
+
+describe("renderFleetDock: Uebersichtlichkeit (PHASE-09)", () => {
+	// Nutzerfeedback nach Live-Einsatz: Laufzeit/Tokens folgten direkt der
+	// Aktivitaetsbeschreibung und standen dadurch je nach deren Laenge an einer
+	// anderen Spaltenposition - senkrechtes Scannen war nicht moeglich.
+	it("keeps the stats column at the same offset regardless of activity text length", () => {
+		const entries = [
+			makeEntry({ key: "a", state: "running", agent: "alpha", activityDetail: "tool: bash", startedAt: 0 }),
+			makeEntry({ key: "b", state: "running", agent: "beta", activityDetail: "tool: edit (extensions/plan-mode/index.ts)", startedAt: 0, updatedAt: -1 }),
+		];
+		const lines = renderFleetDock(entries, undefined, { width: 120, theme: makeTheme(), now: 42_000 }).map(stripAnsi);
+		const lineA = lines.find((line) => line.includes("alpha"))!;
+		const lineB = lines.find((line) => line.includes("beta"))!;
+		assert.equal(lineA.indexOf("42.0s"), lineB.indexOf("42.0s"), "duration must start at the same column on both lines");
+	});
+
+	it("keeps the stats column at the same offset for a deeper (indented) entry too", () => {
+		const entries = [
+			makeEntry({ key: "a", state: "running", agent: "worker", depth: 0, activityDetail: "tool: edit (extensions/plan-mode/index.ts)", startedAt: 0 }),
+			makeEntry({ key: "b", state: "running", agent: "scout", depth: 1, parentKey: "a", activityDetail: "tool: grep", startedAt: 0, updatedAt: -1 }),
+		];
+		const lines = renderFleetDock(entries, undefined, { width: 120, theme: makeTheme(), now: 42_000 }).map(stripAnsi);
+		const parentLine = lines.find((line) => line.includes("worker"))!;
+		const childLine = lines.find((line) => line.includes("scout"))!;
+		assert.equal(parentLine.indexOf("42.0s"), childLine.indexOf("42.0s"), "indentation must not shift the stats column");
+	});
+
+	it("indents a deeper entry's glyph relative to a top-level entry (visible parent/child hierarchy)", () => {
+		const entries = [
+			makeEntry({ key: "a", state: "running", agent: "worker", depth: 0 }),
+			makeEntry({ key: "b", state: "running", agent: "scout", depth: 1, parentKey: "a", updatedAt: -1 }),
+		];
+		const lines = renderFleetDock(entries, undefined, { width: 120, theme: makeTheme(), now: 0 }).map(stripAnsi);
+		const parentLine = lines.find((line) => line.includes("worker"))!;
+		const childLine = lines.find((line) => line.includes("scout"))!;
+		assert.ok(childLine.indexOf("●") > parentLine.indexOf("●"), "a depth-1 entry's glyph must sit further right than a depth-0 entry's");
+	});
+
+	it("never overflows at narrow widths even with a deeply nested (depth 3) entry", () => {
+		const entries = [makeEntry({ key: "a", state: "running", agent: "deep-child", depth: 3, activityDetail: "tool: edit (some/nested/path/file.ts)" })];
+		for (const width of [45, 60, 80]) {
+			const lines = renderFleetDock(entries, undefined, { width, theme: makeTheme(), now: 0 });
+			for (const line of lines) {
+				assert.ok(stripAnsi(line).length <= width, `line too long at width ${width}: ${JSON.stringify(stripAnsi(line))}`);
+			}
 		}
 	});
 });

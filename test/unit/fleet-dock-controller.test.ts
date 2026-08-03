@@ -187,6 +187,43 @@ describe("FleetDockController keyboard focus", () => {
 		assert.equal(controller.isActive(), false);
 	});
 
+	it("activates on super+down even when the editor has text (PHASE-09)", () => {
+		const controller = createFleetDockController(stateWithTwoEntries(), NO_ASYNC_DEPS);
+		const result = controller.handleTerminalInput(filledEditor(), "\u001b[1;9B");
+		assert.equal(result?.consume, true);
+		assert.equal(controller.isActive(), true);
+		assert.notEqual(controller.getSelectedKey(), undefined);
+	});
+
+	it("activates on super+down when the editor is empty too (PHASE-09)", () => {
+		const controller = createFleetDockController(stateWithTwoEntries(), NO_ASYNC_DEPS);
+		const result = controller.handleTerminalInput(emptyEditor(), "\u001b[1;9B");
+		assert.equal(result?.consume, true);
+		assert.equal(controller.isActive(), true);
+	});
+
+	it("does not immediately self-heal after super+down just because the editor already had text (PHASE-09)", () => {
+		const controller = createFleetDockController(stateWithTwoEntries(), NO_ASYNC_DEPS);
+		controller.handleTerminalInput(filledEditor(), "\u001b[1;9B");
+		assert.equal(controller.isActive(), true);
+
+		// The editor text has not changed since activation - navigating must
+		// stay consumed by the dock instead of bouncing back to the editor.
+		const result = controller.handleTerminalInput(filledEditor(), "\u001b[B");
+		assert.equal(result?.consume, true);
+		assert.equal(controller.isActive(), true);
+	});
+
+	it("still self-heals after super+down once the editor text actually changes (PHASE-09)", () => {
+		const controller = createFleetDockController(stateWithTwoEntries(), NO_ASYNC_DEPS);
+		controller.handleTerminalInput(filledEditor(), "\u001b[1;9B");
+		assert.equal(controller.isActive(), true);
+
+		const result = controller.handleTerminalInput({ getEditorText: () => "some text more" }, "a");
+		assert.equal(result, undefined);
+		assert.equal(controller.isActive(), false);
+	});
+
 	it("ignores keys other than down while inactive", () => {
 		const controller = createFleetDockController(stateWithTwoEntries(), NO_ASYNC_DEPS);
 		const result = controller.handleTerminalInput(emptyEditor(), "\u001b[A");

@@ -22,6 +22,12 @@
  * wieder Text enthaelt (z.B. weil der Nutzer zu tippen begonnen hat), statt
  * bei jeder anderen Taste explizit zu raten, ob sie Text erzeugt.
  *
+ * PHASE-09: die leerer-Editor-Bedingung fuehlte sich im Praxiseinsatz
+ * zufaellig an (Nutzerfeedback: springt nur, wenn man gerade nichts
+ * getippt hat). "super+down" aktiviert den Dock deshalb zusaetzlich als
+ * bewusstes, jederzeit verfuegbares Kuerzel, unabhaengig vom Editor-Inhalt -
+ * bestehendes Verhalten bleibt unveraendert bestehen.
+ *
  * KNOWN GAP: Editor-Inhalt, der ohne dazwischenliegenden Tastendruck
  * erscheint (z.B. Paste ueber einen anderen Kanal als das Terminal-Input),
  * wird erst beim naechsten Tastendruck erkannt - der Guard prueft nur beim
@@ -85,6 +91,7 @@ export class FleetDockController {
 	private lastIndex = 0;
 	private expandedKey: string | undefined;
 	private active = false;
+	private activationEditorLength = 0;
 	private cachedEntries: FleetAgentEntry[] = [];
 	private cachedAt = Number.NEGATIVE_INFINITY;
 	private readonly dismissedKeys = new Set<string>();
@@ -251,11 +258,19 @@ export class FleetDockController {
 	 */
 	handleTerminalInput(ctx: { getEditorText(): string }, data: string): TerminalInputResult {
 		if (isKeyRelease(data)) return undefined;
-		if (this.active && ctx.getEditorText().length > 0) {
+		// Compares against the length captured at activation time, not against 0:
+		// "super+down" (below) can activate the dock while the editor already has
+		// text, and that starting text must not immediately self-heal the very
+		// next keystroke just because it is still non-empty.
+		if (this.active && ctx.getEditorText().length !== this.activationEditorLength) {
 			this.deactivate();
 		}
 		if (!this.active) {
-			if (ctx.getEditorText().length === 0 && matchesKey(data, "down")) {
+			// PHASE-09: super+down is a deliberate, always-available jump to the
+			// dock, independent of editor content - unlike plain "down", which
+			// only activates when the editor is already empty (see class header).
+			if (matchesKey(data, "super+down") || (ctx.getEditorText().length === 0 && matchesKey(data, "down"))) {
+				this.activationEditorLength = ctx.getEditorText().length;
 				this.activate();
 				return { consume: true };
 			}
