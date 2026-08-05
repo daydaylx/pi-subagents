@@ -16,6 +16,7 @@ interface AsyncJobTrackerModule {
 			kill?: (pid: number, signal?: NodeJS.Signals | 0) => boolean;
 			now?: () => number;
 			showAsyncWidget?: boolean;
+			refreshWhenWidgetHidden?: boolean;
 		},
 	): {
 		ensurePoller(): void;
@@ -131,19 +132,20 @@ describe("async job tracker", { skip: !available ? "pi packages not available" :
 		}
 	});
 
-	it("still requests a repaint when suppressAsyncWidget is set, without touching the old widget (PHASE-06)", async () => {
-		const asyncRoot = createTempDir("pi-async-job-tracker-suppressed-");
+	it("refreshes the Fleet dock without restoring the legacy async widget", () => {
+		const asyncRoot = createTempDir("pi-async-job-tracker-fleet-");
 		try {
-			const state = createState() as Record<string, unknown>;
-			state.suppressAsyncWidget = true;
+			const state = createState();
 			const ui = createUiContext();
-			const tracker = trackerMod!.createAsyncJobTracker(createEventRecorder().pi, state, asyncRoot, {
-				completionRetentionMs: 5,
+			const tracker = trackerMod!.createAsyncJobTracker(createEventRecorder().pi, state as never, asyncRoot, {
+				showAsyncWidget: false,
+				refreshWhenWidgetHidden: true,
 			});
 			tracker.resetJobs(ui.ctx as never);
-			tracker.handleStarted({ id: "run-suppressed", asyncDir: path.join(asyncRoot, "run-suppressed"), agent: "worker" });
-			assert.equal(ui.widgets.length, 0, "the old async widget must stay untouched while FleetView owns the display");
-			assert.ok(ui.renderRequests > 0, "a repaint must still be requested so the Fleet Dock reflects the state change immediately");
+			tracker.handleStarted({ id: "run-fleet", asyncDir: path.join(asyncRoot, "run-fleet"), agent: "worker" });
+
+			assert.equal(ui.widgets.length, 0, "Fleet mode must not restore the legacy widget");
+			assert.ok(ui.renderRequests > 0, "Fleet mode refreshes the existing read-only dock");
 		} finally {
 			removeTempDir(asyncRoot);
 		}

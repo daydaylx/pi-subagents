@@ -26,6 +26,8 @@ interface AsyncJobTrackerOptions {
 	kill?: (pid: number, signal?: NodeJS.Signals | 0) => boolean;
 	now?: () => number;
 	showAsyncWidget?: boolean;
+	/** Refresh another persistent view (the Fleet dock) when the legacy widget is disabled. */
+	refreshWhenWidgetHidden?: boolean;
 }
 
 const CONTROL_EVENT_READ_CHUNK_BYTES = 64 * 1024;
@@ -43,22 +45,14 @@ export function createAsyncJobTracker(pi: Pick<ExtensionAPI, "events">, state: S
 	const pollIntervalMs = options.pollIntervalMs ?? POLL_INTERVAL_MS;
 	const resultsDir = options.resultsDir ?? RESULTS_DIR;
 	const showAsyncWidget = options.showAsyncWidget !== false;
+	const refreshWhenWidgetHidden = options.refreshWhenWidgetHidden === true;
+	const requestRender = (ctx: ExtensionContext) => {
+		// Pi exposes this at runtime, but the installed peer type does not yet declare it.
+		(ctx.ui as ExtensionContext["ui"] & { requestRender?: () => void }).requestRender?.();
+	};
 	const rerenderWidget = (ctx: ExtensionContext, jobs = Array.from(state.asyncJobs.values())) => {
-		if (state.suppressAsyncWidget) {
-			// PHASE-06: FleetView ist aktiv und unterdrueckt das alte Widget - der
-			// renderWidget()-Aufruf entfaellt, aber ein Repaint wird trotzdem
-			// angestossen, damit Async-Start/-Abschluss/Pause/Stop/Fehler auch dann
-			// sofort im Fleet Dock sichtbar werden, wenn die Aenderung nicht ueber
-			// einen tool_result-Event laeuft (z.B. ein reiner Poller-Tick). Ohne
-			// diesen Aufruf aktualisiert sich das throttled FleetDockController-
-			// Widget erst beim naechsten ohnehin stattfindenden Repaint (z.B.
-			// Tastendruck) - siehe DECISIONS.md.
-			ctx.ui.requestRender?.();
-			return;
-		}
-		if (!showAsyncWidget) return;
-		renderWidget(ctx, jobs);
-		ctx.ui.requestRender?.();
+		if (showAsyncWidget) renderWidget(ctx, jobs);
+		if (showAsyncWidget || refreshWhenWidgetHidden) requestRender(ctx);
 	};
 	const restoredControlEventCursor = (asyncDir: string) => {
 		try {

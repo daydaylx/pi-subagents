@@ -576,9 +576,9 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 			const staticStep = nextFlatStep();
 			return buildSeqStep(s as SequentialStep, staticStep.sessionFile, undefined, false, undefined, staticStep.index);
 		});
-		const steps = params.attachRoot
+		const steps = (params.attachRoot
 			? [{
-					agent: params.attachRoot.agent,
+						agent: params.attachRoot.agent ?? "subagent",
 					task: "",
 					label: params.attachRoot.label ?? `Attached root ${params.attachRoot.runId}`,
 					outputName: params.attachRoot.outputName,
@@ -591,7 +591,7 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 					inheritProjectContext: false,
 					inheritSkills: false,
 				}, ...builtSteps]
-			: builtSteps;
+			: builtSteps) as unknown as RunnerStep[];
 		return { steps, runnerCwd, workflowGraph, eventChain: graphChain, ...(originalTask !== undefined ? { originalTask } : {}) };
 	} catch (error) {
 		if (error instanceof UnavailableSubagentSkillError || error instanceof AsyncStartValidationError) return { error: error.message };

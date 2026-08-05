@@ -434,9 +434,9 @@ function runPiStreaming(
 			}
 		};
 
-		const appendChildEvent = (event: Record<string, unknown>) => {
+		const appendChildEvent = (event: ChildEvent | Record<string, unknown>) => {
 			if (!childEventContext) return;
-			if (!shouldPersistChildEvent(event)) return;
+			if (!shouldPersistChildEvent(event as Record<string, unknown>)) return;
 			appendDiagnosticJsonl(childEventContext.eventsPath, JSON.stringify({
 				...event,
 				subagentSource: "child",
@@ -894,6 +894,7 @@ async function runSingleStep(
 	model?: string;
 	attemptedModels?: string[];
 	modelAttempts?: ModelAttempt[];
+	totalCost?: CostSummary;
 	artifactPaths?: ArtifactPaths;
 	transcriptPath?: string;
 	transcriptError?: string;
@@ -912,7 +913,8 @@ async function runSingleStep(
 	structuredOutputPath?: string;
 	structuredOutputSchemaPath?: string;
 	acceptance?: import("../../shared/types.ts").AcceptanceLedger;
-}> {
+	watchdog?: import("../../shared/types.ts").ChildWatchdogProgress;
+	}> {
 	if (step.importAsyncRoot) {
 		let importTimedOut = false;
 		let importStopped = false;
@@ -2646,7 +2648,7 @@ async function runSubagent(config: SubagentRunConfig): Promise<void> {
 					error: pr.error,
 					success: pr.stopped !== true && pr.interrupted !== true && pr.exitCode === 0,
 					exitCode: pr.interrupted === true ? 0 : pr.exitCode,
-					skipped: pr.skipped,
+					skipped: "skipped" in pr ? pr.skipped : undefined,
 					interrupted: pr.interrupted,
 					timedOut: pr.timedOut,
 					stopped: pr.stopped,
@@ -2989,7 +2991,7 @@ async function runSubagent(config: SubagentRunConfig): Promise<void> {
 						error: pr.error,
 						success: pr.stopped !== true && pr.interrupted !== true && pr.exitCode === 0,
 						exitCode: pr.interrupted === true ? 0 : pr.exitCode,
-						skipped: pr.skipped,
+						skipped: "skipped" in pr ? pr.skipped : undefined,
 						interrupted: pr.interrupted,
 						timedOut: pr.timedOut,
 						stopped: pr.stopped,

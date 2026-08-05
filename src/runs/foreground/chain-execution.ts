@@ -410,6 +410,7 @@ interface ChainExecutionParams {
 	runId: string;
 	cwd?: string;
 	shareEnabled: boolean;
+	modelScope?: ModelScopeConfig;
 	sessionDirForIndex: (idx?: number) => string | undefined;
 	sessionFileForIndex?: (idx?: number) => string | undefined;
 	sessionFileForTask?: (agentName: string, idx?: number) => string | undefined;

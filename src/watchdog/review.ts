@@ -29,7 +29,9 @@ const WatchdogWarnParams = Type.Object({
 
 type WatchdogWarnParams = Static<typeof WatchdogWarnParams>;
 
-type WatchdogContextProvider = ExtensionContext | (() => ExtensionContext | undefined);
+type WatchdogReviewRegistry = Pick<ExtensionContext["modelRegistry"], "getAvailable" | "find" | "hasConfiguredAuth" | "getApiKeyAndHeaders">;
+type WatchdogReviewContext = Pick<ExtensionContext, "cwd" | "signal"> & { modelRegistry: WatchdogReviewRegistry; model?: ExtensionContext["model"]; thinkingLevel?: unknown };
+type WatchdogContextProvider = WatchdogReviewContext | (() => WatchdogReviewContext | undefined);
 
 type RegistryModel = Model<any>;
 
@@ -67,7 +69,7 @@ function assertThinkingLevel(value: string, source: string): ThinkingLevel {
 	throw new Error(`Unsupported watchdog thinking level '${value}' from ${source}; expected ${THINKING_LEVELS.join(", ")} or false.`);
 }
 
-function contextThinkingLevel(ctx: ExtensionContext, currentThinkingLevel: ThinkingLevel | undefined): ThinkingLevel | undefined {
+function contextThinkingLevel(ctx: WatchdogReviewContext, currentThinkingLevel: ThinkingLevel | undefined): ThinkingLevel | undefined {
 	if (currentThinkingLevel) return currentThinkingLevel;
 	const value = (ctx as { thinkingLevel?: unknown }).thinkingLevel;
 	return typeof value === "string" && (THINKING_LEVELS as readonly string[]).includes(value) ? value as ThinkingLevel : undefined;
@@ -76,7 +78,7 @@ function contextThinkingLevel(ctx: ExtensionContext, currentThinkingLevel: Think
 function resolveReviewThinking(input: {
 	modelString: string;
 	configThinking: string | false | undefined;
-	ctx: ExtensionContext;
+	ctx: WatchdogReviewContext;
 	allowContextThinking: boolean;
 	currentThinkingLevel?: ThinkingLevel;
 }): ThinkingLevel {
@@ -88,7 +90,7 @@ function resolveReviewThinking(input: {
 	return "off";
 }
 
-function resolveConfiguredModel(ctx: ExtensionContext, rawModel: string): { model: RegistryModel; modelString: string } {
+function resolveConfiguredModel(ctx: WatchdogReviewContext, rawModel: string): { model: RegistryModel; modelString: string } {
 	const availableModels = ctx.modelRegistry.getAvailable().map(toModelInfo);
 	const preferredProvider = typeof ctx.model?.provider === "string" ? ctx.model.provider : undefined;
 	const resolved = resolveModelCandidate(rawModel, availableModels, preferredProvider);
@@ -106,18 +108,18 @@ function resolveConfiguredModel(ctx: ExtensionContext, rawModel: string): { mode
 	return { model, modelString: resolved };
 }
 
-async function resolveReviewAuth(ctx: ExtensionContext, model: RegistryModel): Promise<WatchdogReviewAuth> {
+async function resolveReviewAuth(ctx: WatchdogReviewContext, model: RegistryModel): Promise<WatchdogReviewAuth> {
 	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-	if (!auth.ok) throw new Error(`Watchdog model auth failed for ${fullModelId(model)}: ${auth.error}`);
+	if (!auth.ok) throw new Error(`Watchdog model auth failed for ${fullModelId(model)}: ${"error" in auth ? auth.error : "unknown authentication error"}`);
 	return {
 		...(auth.apiKey ? { apiKey: auth.apiKey } : {}),
 		...(auth.headers ? { headers: auth.headers } : {}),
-		...(auth.env ? { env: auth.env } : {}),
+		...("env" in auth && auth.env && typeof auth.env === "object" ? { env: auth.env as Record<string, string> } : {}),
 	};
 }
 
 export async function resolveWatchdogReviewModel(
-	ctx: ExtensionContext,
+	ctx: WatchdogReviewContext,
 	config: ResolvedWatchdogConfig,
 	options: { currentThinkingLevel?: ThinkingLevel } = {},
 ): Promise<WatchdogReviewModelSelection> {
@@ -200,7 +202,7 @@ function createWatchdogWarnTool(request: WatchdogReviewRequest): AgentTool<typeo
 	};
 }
 
-function buildWatchdogSystemPrompt(ctx: ExtensionContext): string {
+function buildWatchdogSystemPrompt(ctx: WatchdogReviewContext): string {
 	return [
 		"You are the main-session subagent watchdog for Pi.",
 		`Working directory: ${ctx.cwd}`,
@@ -237,7 +239,7 @@ function finalStopReason(agent: Agent): "stop" | "error" | "aborted" | "length" 
 	return "stop";
 }
 
-function resolveContext(provider: WatchdogContextProvider): ExtensionContext | undefined {
+function resolveContext(provider: WatchdogContextProvider): WatchdogReviewContext | undefined {
 	return typeof provider === "function" ? provider() : provider;
 }
 
@@ -255,7 +257,6 @@ export function createMainWatchdogReview(provider: WatchdogContextProvider, opti
 		const streamFn: StreamFn = (model, context, streamOptions) => baseStreamFn(model, context, {
 			...streamOptions,
 			...(auth.apiKey ? { apiKey: auth.apiKey } : {}),
-			env: auth.env || streamOptions?.env ? { ...(auth.env ?? {}), ...(streamOptions?.env ?? {}) } : undefined,
 			headers: { ...(streamOptions?.headers ?? {}), ...(auth.headers ?? {}) },
 		});
 		const tools = [

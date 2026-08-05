@@ -32,6 +32,7 @@ interface AsyncRunStepSummary {
 	durationMs?: number;
 	tokens?: TokenUsage;
 	totalCost?: CostSummary;
+	sessionFile?: string;
 	skills?: string[];
 	model?: string;
 	thinking?: string;

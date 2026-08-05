@@ -57,7 +57,7 @@ import {
 	resolveSubagentResultStatus,
 	stripDetailsOutputsForIntercomReceipt,
 } from "../../intercom/result-intercom.ts";
-import { buildRevivedAsyncTask, interruptLiveAsyncResumeTarget, resolveAsyncResumeTarget, resolveAsyncRunLocation } from "../background/async-resume.ts";
+import { buildRevivedAsyncTask, interruptLiveAsyncResumeTarget, resolveAsyncResumeTarget, resolveAsyncRunLocation, type AsyncResumeTarget } from "../background/async-resume.ts";
 import { deliverInterruptRequest, deliverStopRequest, requestAsyncSteer } from "../background/control-channel.ts";
 import { reconcileAsyncRun } from "../background/stale-run-reconciler.ts";
 import { resolveAsyncRootResultPath } from "../background/chain-root-attachment.ts";
@@ -139,6 +139,8 @@ export interface SubagentParamsLike {
 	task?: string;
 	message?: string;
 	chain?: ChainStep[];
+	chainName?: string;
+	config?: unknown;
 	tasks?: TaskParam[];
 	concurrency?: number;
 	worktree?: boolean;
@@ -164,6 +166,7 @@ export interface SubagentParamsLike {
 	output?: string | boolean;
 	outputMode?: "inline" | "file-only";
 	agentScope?: unknown;
+	modelScope?: ModelScopeConfig;
 	chainDir?: string;
 	acceptance?: AcceptanceInput;
 	schedule?: string;
@@ -411,7 +414,7 @@ function resolveForegroundResumeTarget(params: SubagentParamsLike, state: Subage
 }
 
 type AsyncResumeSourceTarget = ReturnType<typeof resolveAsyncResumeTarget> & { source: "async" };
-type ForegroundResumeSourceTarget = NonNullable<ReturnType<typeof resolveForegroundResumeTarget>> & { kind: "revive"; source: "foreground" };
+type ForegroundResumeSourceTarget = NonNullable<ReturnType<typeof resolveForegroundResumeTarget>> & { kind: "revive"; source: "foreground"; model?: string; thinking?: string };
 type NestedResumeSourceTarget = {
 	kind: "revive";
 	source: "nested";
@@ -422,6 +425,8 @@ type NestedResumeSourceTarget = {
 	intercomTarget: string;
 	cwd?: string;
 	sessionFile: string;
+	model?: string;
+	thinking?: string;
 };
 type ResumeSourceTarget = AsyncResumeSourceTarget | ForegroundResumeSourceTarget | NestedResumeSourceTarget;
 
@@ -1067,12 +1072,12 @@ async function resumeAsyncRun(input: {
 
 	if (target.kind === "live" && !attachChain) {
 		const interrupt = interruptLiveAsyncResumeTarget({
-			target,
+				target: target as AsyncResumeTarget & { kind: "live" },
 			state: input.deps.state,
 			kill: input.deps.kill,
 			resultsDir: RESULTS_DIR,
 		});
-		if (!interrupt.ok) {
+			if ("message" in interrupt) {
 			return {
 				content: [{ type: "text", text: interrupt.message }],
 				isError: true,
@@ -3226,7 +3231,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 				const nestedScope = nestedResolutionScopeForExecutor(deps);
 				const sessionRoots = trustedSessionRootsForStatus(ctx, deps);
 				if (paramsWithResolvedCwd.view === "fleet") {
-					return inspectSubagentStatus(paramsWithResolvedCwd, { state: deps.state, nested: nestedScope, sessionRoots });
+						return inspectSubagentStatus(paramsWithResolvedCwd as unknown as Parameters<typeof inspectSubagentStatus>[0], { state: deps.state, nested: nestedScope, sessionRoots });
 				}
 				if (targetRunId) {
 					try {
@@ -3257,7 +3262,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 						};
 					}
 				}
-				return inspectSubagentStatus(paramsWithResolvedCwd, { state: deps.state, nested: nestedScope, sessionRoots });
+			return inspectSubagentStatus(paramsWithResolvedCwd as unknown as Parameters<typeof inspectSubagentStatus>[0], { state: deps.state, nested: nestedScope, sessionRoots });
 			}
 			if (action === "resume") {
 				return resumeAsyncRun({ params: paramsWithResolvedCwd, requestCwd, ctx, deps });
@@ -3392,7 +3397,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 					details: { mode: "management" as const, results: [] },
 				};
 			}
-			return handleManagementAction(action, paramsWithResolvedCwd, {
+			return handleManagementAction(action, paramsWithResolvedCwd as never, {
 				...ctx,
 				cwd: requestCwd,
 				config: deps.config,

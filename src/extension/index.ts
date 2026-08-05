@@ -130,11 +130,12 @@ function ensureSubagentResultAnimation(context: { state: Record<string, unknown>
 	const state = context.state as { subagentResultAnimationTimer?: ReturnType<typeof setInterval>; frame?: number };
 	if (state.subagentResultAnimationTimer) return;
 	if (typeof context.invalidate !== "function") return;
+	const invalidate = context.invalidate;
 	if (state.frame === undefined) state.frame = 0;
 	state.subagentResultAnimationTimer = setInterval(() => {
 		state.frame = ((state.frame ?? 0) + 1) % 10;
 		try {
-			context.invalidate();
+			invalidate();
 		} catch {}
 	}, 80);
 }
@@ -261,7 +262,7 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 	const config = loadConfig();
 	const waitToolConfig = resolveWaitToolConfig(config.waitTool);
 	const asyncByDefault = config.asyncByDefault === true;
-	const showAsyncWidget = config.ui?.showAsyncWidget !== false;
+	const showAsyncWidget = config.ui?.fleetView !== true && config.ui?.showAsyncWidget !== false;
 	const tempArtifactsDir = getArtifactsDir(null);
 	cleanupAllArtifactDirs(DEFAULT_ARTIFACT_CONFIG.cleanupDays);
 
@@ -315,6 +316,7 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 
 	const { ensurePoller, handleStarted, handleComplete, resetJobs, restoreActiveJobs } = createAsyncJobTracker(pi, state, ASYNC_DIR, {
 		showAsyncWidget,
+		refreshWhenWidgetHidden: config.ui?.fleetView === true,
 	});
 	let executorExecute: ((id: string, params: SubagentParamsLike, signal: AbortSignal, onUpdate: ((r: AgentToolResult<Details>) => void) | undefined, ctx: ExtensionContext) => Promise<AgentToolResult<Details>>) | undefined;
 	const scheduledRunManager = createScheduledRunManager({
@@ -469,7 +471,7 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		parameters: SubagentParams,
 
 		execute(id, params, signal, onUpdate, ctx) {
-			return executeSubagentCollapsed(id, params, signal, onUpdate, ctx);
+		return executeSubagentCollapsed(id, params as unknown as SubagentParamsLike, signal ?? new AbortController().signal, onUpdate, ctx);
 		},
 
 		renderCall(args, theme) {
@@ -578,7 +580,7 @@ wait also returns when a run needs attention (a child that went idle or blocked 
 		state.lastUiContext = ctx;
 		if (showAsyncWidget && state.asyncJobs.size > 0) {
 			renderWidget(ctx, Array.from(state.asyncJobs.values()));
-			ctx.ui.requestRender?.();
+			(ctx.ui as ExtensionContext["ui"] & { requestRender?: () => void }).requestRender?.();
 			ensurePoller();
 		}
 		fleetDockWiring.onToolResult(ctx);

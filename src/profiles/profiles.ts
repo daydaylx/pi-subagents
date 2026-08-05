@@ -8,6 +8,9 @@ import { getAgentDir } from "../shared/utils.ts";
 
 export const DEFAULT_PROVIDER_MODELS_MAX_AGE_DAYS = 7;
 
+type ProfileModelRegistry = Pick<ExtensionContext["modelRegistry"], "getAvailable">;
+type ProfileContext = { cwd: string; modelRegistry: ProfileModelRegistry };
+
 type BuiltinAgentName = typeof BUILTIN_AGENT_NAMES[number];
 export type ProfileKind = "quota" | "quality";
 export type ProbeStatus = "ok" | "unavailable" | "auth" | "timeout" | "error" | "skipped";
@@ -488,7 +491,7 @@ export function isProviderModelCatalogStale(catalog: ProviderModelCatalogFile, m
 
 export async function refreshProviderModelCatalog(
 	pi: Pick<ExtensionAPI, "exec"> | { exec?: ExtensionAPI["exec"] },
-	ctx: Pick<ExtensionContext, "cwd" | "modelRegistry">,
+	ctx: ProfileContext,
 	provider: string,
 	options: { force?: boolean; maxAgeDays?: number; probe?: boolean } = {},
 ): Promise<{ filePath: string; catalog: ProviderModelCatalogFile; reused: boolean; heuristicFallbackCount: number }> {
@@ -514,7 +517,7 @@ export async function refreshProviderModelCatalog(
 		probe: { status: ProbeStatus; message?: string };
 	}>;
 	for (const rawModel of availableModels) {
-		const modelRecord = rawModel as Record<string, unknown> & { provider: string; id: string; name?: string };
+		const modelRecord = rawModel as unknown as Record<string, unknown> & { provider: string; id: string; name?: string };
 		const fullId = `${modelRecord.provider}/${modelRecord.id}`;
 		const probe = options.probe === false
 			? { status: "skipped" as const, message: "Live probing disabled." }
@@ -578,7 +581,7 @@ export async function refreshProviderModelCatalog(
 
 export async function generateProfilesForProvider(
 	pi: Pick<ExtensionAPI, "exec"> | { exec?: ExtensionAPI["exec"] },
-	ctx: Pick<ExtensionContext, "cwd" | "modelRegistry">,
+	ctx: ProfileContext,
 	provider: string,
 	options: { maxAgeDays?: number; forceRefresh?: boolean; probe?: boolean } = {},
 ): Promise<{ quotaPath: string; qualityPath: string; catalogPath: string; quotaModels: { cheap: string; medium: string; strong: string }; qualityModels: { cheap: string; medium: string; strong: string }; heuristicFallbackCount: number; selectedHeuristicFallbackCount: number }> {
@@ -607,7 +610,7 @@ export async function generateProfilesForProvider(
 
 export async function checkSubagentProfile(
 	pi: Pick<ExtensionAPI, "exec"> | { exec?: ExtensionAPI["exec"] },
-	ctx: Pick<ExtensionContext, "cwd" | "modelRegistry">,
+	ctx: ProfileContext,
 	name: string,
 ): Promise<ProfileCheckResult> {
 	const { filePath, profile } = readSubagentProfile(name);

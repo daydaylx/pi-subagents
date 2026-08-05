@@ -34,6 +34,9 @@ const STRONG_WATCHDOG_MODELS = {
 
 type StrongWatchdogFamily = keyof typeof STRONG_WATCHDOG_MODELS;
 
+type WatchdogModelRegistry = Pick<ExtensionContext["modelRegistry"], "getAvailable" | "find" | "hasConfiguredAuth">;
+type WatchdogContext = { modelRegistry: WatchdogModelRegistry; model?: ExtensionContext["model"] };
+
 type RegistryModel = ReturnType<ExtensionContext["modelRegistry"]["find"]>;
 
 export interface ResolvedWatchdogModelInput {
@@ -54,7 +57,7 @@ function fullModelId(model: Pick<ModelInfo, "provider" | "id">): string {
 	return `${model.provider}/${model.id}`;
 }
 
-function modelRegistryEntries(ctx: ExtensionContext): ModelInfo[] {
+function modelRegistryEntries(ctx: WatchdogContext): ModelInfo[] {
 	return ctx.modelRegistry.getAvailable().map(toModelInfo);
 }
 
@@ -76,7 +79,7 @@ export function parseWatchdogThinkingInput(value: string | false | undefined, so
 	return assertSupportedThinking(value, source);
 }
 
-export function resolveWatchdogModelInput(ctx: ExtensionContext, rawModel: string): ResolvedWatchdogModelInput {
+export function resolveWatchdogModelInput(ctx: WatchdogContext, rawModel: string): ResolvedWatchdogModelInput {
 	const trimmed = rawModel.trim();
 	if (!trimmed) throw new Error("Watchdog model must be a non-empty provider/model value.");
 	const availableModels = modelRegistryEntries(ctx);
@@ -106,14 +109,14 @@ function familyForModel(model: Pick<ModelInfo, "provider" | "id"> | undefined): 
 	return undefined;
 }
 
-function currentProviderFamily(ctx: ExtensionContext): "openai" | "anthropic" | undefined {
+function currentProviderFamily(ctx: WatchdogContext): "openai" | "anthropic" | undefined {
 	const provider = typeof ctx.model?.provider === "string" ? normalizeModelSegment(ctx.model.provider) : "";
 	if (provider.includes("openai")) return "openai";
 	if (provider.includes("anthropic")) return "anthropic";
 	return undefined;
 }
 
-function strongFamilyOrder(ctx: ExtensionContext): StrongWatchdogFamily[] {
+function strongFamilyOrder(ctx: WatchdogContext): StrongWatchdogFamily[] {
 	const current = ctx.model ? familyForModel(toModelInfo(ctx.model)) : undefined;
 	if (current === "gpt55") return ["opus48"];
 	if (current === "opus48") return ["gpt55"];
@@ -129,10 +132,10 @@ function findFamilyMatch(family: StrongWatchdogFamily, availableModels: ModelInf
 	return undefined;
 }
 
-function resolveStrongCandidate(ctx: ExtensionContext, family: StrongWatchdogFamily): WatchdogModelRecommendation | undefined {
+function resolveStrongCandidate(ctx: WatchdogContext, family: StrongWatchdogFamily): WatchdogModelRecommendation | undefined {
 	const availableModels = modelRegistryEntries(ctx);
 	const preference = STRONG_WATCHDOG_MODELS[family];
-	const queries = [...preference.queries];
+	const queries: string[] = [...preference.queries];
 	const familyMatch = findFamilyMatch(family, availableModels);
 	if (familyMatch) queries.push(familyMatch);
 	for (const query of queries) {
@@ -157,7 +160,7 @@ function resolveStrongCandidate(ctx: ExtensionContext, family: StrongWatchdogFam
 	return undefined;
 }
 
-export function recommendStrongWatchdogModel(ctx: ExtensionContext): WatchdogModelRecommendation {
+export function recommendStrongWatchdogModel(ctx: WatchdogContext): WatchdogModelRecommendation {
 	for (const family of strongFamilyOrder(ctx)) {
 		const recommendation = resolveStrongCandidate(ctx, family);
 		if (recommendation) return recommendation;

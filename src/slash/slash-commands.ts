@@ -303,6 +303,7 @@ function stopFallbackText(targets: StopSelectorTarget[]): string {
 }
 
 class SubagentsStopSelector implements Component {
+	invalidate(): void {}
 	readonly width = 84;
 	private selected = 0;
 	private confirming = false;

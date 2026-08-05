@@ -1,76 +1,7 @@
 /**
- * Fleet-Zustandsprojektion (PHASE-03).
- *
- * Konsolidiert fuenf im Fork parallel existierende, teils inkonsistente
- * Progress-Schemas (anonymer foregroundControls-Wert, AsyncJobState /
- * AsyncRunSummary, NestedRunSummary / PublicNestedRunSummary,
- * ForegroundResumeRun, SingleResult / Details) zu einem einzigen,
- * UI-unabhaengigen Modell: FleetAgentEntry.
- *
- * State-Vokabular-Mapping (mapRawStateToFleetState), da mindestens vier
- * inkonsistente Rohvokabulare im Umlauf sind:
- *
- *   Rohwert                 | Herkunft                                 | FleetAgentState
- *   ------------------------|-------------------------------------------|------------------
- *   "queued", "pending"     | AsyncStatus/AsyncJobState/AsyncJobStep     | "running"
- *   "running"                | alle                                       | "running"
- *   "complete", "completed" | AsyncStatus/SubagentResultStatus/...       | "completed"
- *   "failed"                 | alle                                       | "error"
- *   "paused"                 | alle                                       | "paused"
- *   "stopped"                | alle                                       | "stopped"
- *   "detached"                | SubagentResultStatus/WorkflowNodeStatus    | "running" + detached:true
- *
- * Design-Entscheidung "flache Liste statt Rekursion": Live-Parallel-/
- * Chain-Kinder existieren im durablen State ohnehin nicht als Array
- * (state.foregroundControls haelt nur EIN Objekt pro Top-Level-runId, das
- * von jedem Kind-Update ueberschrieben wird). Nur Nested-Runs sind wirklich
- * rekursiv. Ein children?:FleetAgentEntry[]-Feld waere fuer Foreground-
- * Parallel/Chain dauerhaft leer, fuer Nested aber "echt" - inkonsistente
- * Semantik. Stattdessen: parentKey + depth, Consumer gruppiert selbst.
- *
- * KNOWN GAP 1: Watchdog-Eskalation ist nur fuer Async-/Nested-Quellen
- * moeglich. Weder der foregroundControls-Wert noch ForegroundResumeChild
- * fuehren ein watchdog-Feld.
- *
- * KNOWN GAP 2: Fuer aktive Foreground-Parallel-/Chain-Laeufe existiert im
- * Live-State kein Array aller Kinder (nur "wer zuletzt lief, gewinnt" im
- * einzigen foregroundControls-Eintrag). normalizeForegroundActive() liefert
- * daher bewusst nur EINE Sammelzeile pro Top-Level-Lauf.
- *
- * KNOWN GAP 3: Bekannter Fork-Bug - AsyncRunStepSummary (Projektion in
- * async-status.ts, Basis von listAsyncRuns()) fuehrt kein transcriptPath-
- * und kein watchdog-Feld. Nach einem Extension-Neustart (restoreActiveJobs
- * laeuft ueber genau diesen Pfad) fehlen beide Felder auf state.asyncJobs,
- * bis der naechste Poll-Tick sie aus dem rohen AsyncStatus.steps ueberschreibt.
- * transcriptPathMaybeStale markiert betroffene, disk-projizierte Eintraege;
- * fuer live aus state.asyncJobs gelesene Eintraege ist der fehlende Wert von
- * einer echten Neustart-Luecke nicht unterscheidbar und wird daher nicht
- * markiert. Kein Fix dieses Fork-Bugs - ausserhalb des PHASE-03-Scopes.
- *
- * KNOWN GAP 4: ForegroundResumeRun/ForegroundResumeChild fuehren kein
- * startedAt-Feld (nur updatedAt). normalizeForegroundRecent() faellt fuer
- * startedAt auf updatedAt zurueck, statt einen Wert zu erfinden.
- *
- * KNOWN GAP 5: Abgeschlossene/detachte Foreground-Runs (ForegroundResumeRun)
- * fuehren keine nestedChildren mehr - die Nested-Projektion existiert nur auf
- * lebenden foregroundControls-/AsyncJobState-Eintraegen.
- *
- * KNOWN GAP 6 (PHASE-05): model/thinking existieren strukturell nur auf
- * AsyncJobStep/AsyncRunStepSummary (Async-Steps). Weder der anonyme
- * foregroundControls-Wert noch ForegroundResumeChild/NestedStepSummary
- * fuehren diese Felder - Foreground- und Nested-Eintraege lassen model/
- * thinking daher immer undefined, auch wenn der zugrundeliegende Agent
- * tatsaechlich mit einem bestimmten Modell laeuft.
- *
- * KNOWN GAP 7 (PHASE-06): asyncDir/pid (Voraussetzung fuer eine echte,
- * kanalbasierte Stop-Aktion) existieren strukturell nur auf der Async-
- * Parent-Zeile (job.asyncDir/job.pid bzw. run.asyncDir - AsyncRunSummary
- * fuehrt kein pid-Feld, dort bleibt pid daher immer undefined). Foreground-
- * und Nested-Eintraege sowie Async-Steps fuehren beide Felder nicht - deckt
- * sich mit canStop, das fuer all diese Quellen ohnehin false ist (siehe
- * subagent-executor.ts: action="stop" wird fuer foreground/nested explizit
- * abgelehnt, nur echte Async-Runs besitzen den dateibasierten Stop-Kanal
- * aus control-channel.ts).
+ * Projects foreground, async, and nested run records into one flat UI model.
+ * A flat list with `parentKey` and `depth` avoids claiming that every runtime
+ * source can provide a complete child array.
  */
 
 import { shortenPath } from "../../shared/formatters.ts";
@@ -126,9 +57,6 @@ export interface FleetAgentEntry {
 	state: FleetAgentState;
 	needsAttention: boolean;
 	attentionReason?: FleetAttentionReason;
-	canStop: boolean;
-	asyncDir?: string;
-	pid?: number;
 
 	currentTool?: string;
 	currentPath?: string;
@@ -141,9 +69,6 @@ export interface FleetAgentEntry {
 	tokenUsage?: { input: number; output: number; total: number };
 	toolCount?: number;
 	turnCount?: number;
-
-	transcriptPath?: string;
-	transcriptPathMaybeStale?: boolean;
 
 	detached?: boolean;
 }
@@ -279,7 +204,7 @@ export interface ForegroundActiveContext {
 
 /**
  * Normalisiert die aktive Sammelzeile eines Foreground-Laufs (single,
- * parallel oder chain). Liefert bewusst nur EINE Zeile - siehe KNOWN GAP 2.
+ * parallel oder chain). It intentionally emits one stable summary row.
  */
 export function normalizeForegroundActive(control: ForegroundControlState, ctx: ForegroundActiveContext): FleetAgentEntry {
 	updateForegroundNestedProjection(control);
@@ -288,7 +213,7 @@ export function normalizeForegroundActive(control: ForegroundControlState, ctx: 
 	const attention = resolveAttention({
 		lifecycleTerminal: false,
 		controlActivityState: control.currentActivityState,
-		watchdogSnapshot: undefined, // KNOWN GAP 1
+		watchdogSnapshot: undefined,
 		hasPendingSupervisorRequest: Boolean(pendingRequest),
 	});
 
@@ -309,7 +234,6 @@ export function normalizeForegroundActive(control: ForegroundControlState, ctx: 
 		state,
 		needsAttention: attention.needsAttention,
 		attentionReason: attention.attentionReason,
-		canStop: typeof control.interrupt === "function",
 		currentTool: control.currentTool,
 		currentPath: control.currentPath,
 		activityDetail: pickActivityDetail({
@@ -331,8 +255,8 @@ export function normalizeForegroundActive(control: ForegroundControlState, ctx: 
 /**
  * Normalisiert einen kuerzlich abgeschlossenen Foreground-Lauf (Parent- +
  * Kind-Zeilen). Bereits aktive runIds werden uebersprungen (kein Duplikat
- * zur aktiven Zeile). KNOWN GAP 4 (kein startedAt) und KNOWN GAP 5 (keine
- * Nested-Kinder) gelten hier.
+ * zur aktiven Zeile). Da die gespeicherte Zusammenfassung kein `startedAt`
+ * enthaelt, wird ihr Aktualisierungszeitpunkt verwendet.
  */
 export function normalizeForegroundRecent(run: ForegroundResumeRun, activeRunIds: Set<string>): FleetAgentEntry[] {
 	if (activeRunIds.has(run.runId)) return [];
@@ -351,8 +275,7 @@ export function normalizeForegroundRecent(run: ForegroundResumeRun, activeRunIds
 		mode: run.mode,
 		state: worstState,
 		needsAttention: false,
-		canStop: false,
-		startedAt: run.updatedAt, // KNOWN GAP 4
+		startedAt: run.updatedAt,
 		updatedAt: run.updatedAt,
 	};
 
@@ -375,10 +298,8 @@ function normalizeForegroundRecentChild(child: ForegroundResumeChild, run: Foreg
 		mode: run.mode,
 		state,
 		needsAttention: false,
-		canStop: false,
-		startedAt: updatedAt, // KNOWN GAP 4
+		startedAt: updatedAt,
 		updatedAt,
-		transcriptPath: child.transcriptPath,
 		detached: child.status === "detached",
 	};
 }
@@ -399,8 +320,6 @@ interface AsyncStepInput {
 	startedAt?: number;
 	endedAt?: number;
 	lastActivityAt?: number;
-	transcriptPath?: string;
-	transcriptPathMaybeStale?: boolean;
 	model?: string;
 	thinking?: string;
 	now: number;
@@ -431,7 +350,6 @@ function normalizeAsyncStep(input: AsyncStepInput): FleetAgentEntry {
 		state,
 		needsAttention: attention.needsAttention,
 		attentionReason: attention.attentionReason,
-		canStop: false,
 		currentTool: input.currentTool,
 		currentPath: input.currentPath,
 		activityDetail: pickActivityDetail({
@@ -448,8 +366,6 @@ function normalizeAsyncStep(input: AsyncStepInput): FleetAgentEntry {
 		tokenUsage: input.tokens,
 		toolCount: input.toolCount,
 		turnCount: input.turnCount,
-		transcriptPath: input.transcriptPath,
-		transcriptPathMaybeStale: input.transcriptPathMaybeStale,
 		model: input.model,
 		thinking: input.thinking,
 	};
@@ -474,7 +390,7 @@ export function normalizeAsyncJobState(job: AsyncJobState, ctx: AsyncActiveConte
 	const attention = resolveAttention({
 		lifecycleTerminal: !isLiveRawState(job.status),
 		controlActivityState: job.activityState,
-		watchdogSnapshot: undefined, // KNOWN GAP 1: kein Job-Level-Watchdog, nur pro Step.
+		watchdogSnapshot: undefined,
 		hasPendingSupervisorRequest: Boolean(pendingRequest),
 	});
 	const state = attention.stateOverride ?? mapRawStateToFleetState(job.status);
@@ -492,9 +408,6 @@ export function normalizeAsyncJobState(job: AsyncJobState, ctx: AsyncActiveConte
 		state,
 		needsAttention: attention.needsAttention,
 		attentionReason: attention.attentionReason,
-		canStop: isLiveRawState(job.status),
-		asyncDir: job.asyncDir,
-		pid: job.pid,
 		currentTool: job.currentTool,
 		currentPath: job.currentPath,
 		activityDetail: pickActivityDetail({
@@ -530,8 +443,6 @@ export function normalizeAsyncJobState(job: AsyncJobState, ctx: AsyncActiveConte
 			startedAt: step.startedAt,
 			endedAt: step.endedAt,
 			lastActivityAt: step.lastActivityAt,
-			transcriptPath: step.transcriptPath,
-			transcriptPathMaybeStale: false,
 			model: step.model,
 			thinking: step.thinking,
 			now: ctx.now,
@@ -546,7 +457,7 @@ export function normalizeAsyncJobState(job: AsyncJobState, ctx: AsyncActiveConte
  * asyncIds verwendet, die NICHT bereits in state.asyncJobs stehen (Dedupe
  * durch den Aufrufer) - noetig, weil abgeschlossene Jobs dort nach 10s
  * verschwinden (kind:"recent" jenseits dieses Fensters kommt ausschliesslich
- * von hier). KNOWN GAP 3 gilt fuer alle Step-Zeilen dieser Funktion.
+ * von hier).
  */
 export function normalizeAsyncRunSummary(run: AsyncRunSummary, ctx: { now: number }): FleetAgentEntry[] {
 	const attention = resolveAttention({
@@ -570,8 +481,6 @@ export function normalizeAsyncRunSummary(run: AsyncRunSummary, ctx: { now: numbe
 		state,
 		needsAttention: attention.needsAttention,
 		attentionReason: attention.attentionReason,
-		canStop: isLiveRawState(run.state),
-		asyncDir: run.asyncDir,
 		currentTool: run.currentTool,
 		currentPath: run.currentPath,
 		activityDetail: pickActivityDetail({
@@ -590,7 +499,6 @@ export function normalizeAsyncRunSummary(run: AsyncRunSummary, ctx: { now: numbe
 		turnCount: run.turnCount,
 	};
 
-	const terminal = state === "completed" || state === "error" || state === "stopped" || state === "paused";
 	const stepEntries = run.steps.map((step, index) =>
 		normalizeAsyncStep({
 			runId: run.id,
@@ -599,7 +507,7 @@ export function normalizeAsyncRunSummary(run: AsyncRunSummary, ctx: { now: numbe
 			agent: step.agent,
 			status: step.status,
 			activityState: step.activityState,
-			watchdog: undefined, // KNOWN GAP 3
+			watchdog: undefined,
 			currentTool: step.currentTool,
 			currentPath: step.currentPath,
 			turnCount: step.turnCount,
@@ -608,8 +516,6 @@ export function normalizeAsyncRunSummary(run: AsyncRunSummary, ctx: { now: numbe
 			startedAt: undefined,
 			endedAt: undefined,
 			lastActivityAt: step.lastActivityAt,
-			transcriptPath: undefined, // KNOWN GAP 3
-			transcriptPathMaybeStale: terminal,
 			model: step.model,
 			thinking: step.thinking,
 			now: ctx.now,
@@ -665,7 +571,6 @@ export function normalizeNestedRun(run: NestedRunSummary, parentKey: string, dep
 		state,
 		needsAttention: attention.needsAttention,
 		attentionReason: attention.attentionReason,
-		canStop: false,
 		currentTool: run.currentTool,
 		currentPath: run.currentPath,
 		activityDetail: pickActivityDetail({
@@ -716,7 +621,6 @@ function normalizeNestedStep(step: NestedStepSummary, parentKey: string, index: 
 		state,
 		needsAttention: attention.needsAttention,
 		attentionReason: attention.attentionReason,
-		canStop: false,
 		currentTool: step.currentTool,
 		currentPath: step.currentPath,
 		activityDetail: pickActivityDetail({
@@ -729,7 +633,6 @@ function normalizeNestedStep(step: NestedStepSummary, parentKey: string, index: 
 		}),
 		startedAt,
 		updatedAt,
-		transcriptPath: step.transcriptPath,
 	};
 
 	const childEntries = (step.children ?? []).flatMap((child) => normalizeNestedRun(child, stepKey, depth + 1, ctx));

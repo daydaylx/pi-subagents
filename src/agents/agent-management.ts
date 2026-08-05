@@ -37,7 +37,8 @@ import { getProjectConfigDir } from "../shared/utils.ts";
 
 type ManagementAction = "list" | "get" | "models" | "create" | "update" | "delete" | "eject" | "disable" | "enable" | "reset";
 type ManagementScope = "user" | "project";
-type ManagementContext = Pick<ExtensionContext, "cwd" | "modelRegistry"> & { model?: ExtensionContext["model"]; config?: ExtensionConfig };
+type ManagementModelRegistry = Pick<ExtensionContext["modelRegistry"], "getAvailable">;
+type ManagementContext = { cwd: string; modelRegistry: ManagementModelRegistry; model?: ExtensionContext["model"]; config?: ExtensionConfig };
 
 interface ManagementParams {
 	action?: string;
@@ -156,7 +157,7 @@ function isMutableSource(source: AgentSource): source is ManagementScope {
 function unknownChainAgents(cwd: string, steps: ChainStepConfig[]): string[] {
 	const d = discoverAgentsAll(cwd);
 	const known = new Set(allAgents(d).map((a) => a.name));
-	return [...new Set(steps.map((s) => s.agent).filter((a) => !known.has(a)))].sort((a, b) => a.localeCompare(b));
+	return [...new Set(steps.map((s) => s.agent).filter((a): a is string => typeof a === "string" && !known.has(a)))].sort((a, b) => a.localeCompare(b));
 }
 
 function chainStepWarnings(ctx: ManagementContext, steps: ChainStepConfig[]): string[] {
@@ -851,6 +852,7 @@ export function handleUpdate(params: ManagementParams, ctx: ManagementContext): 
 			if (sw) warnings.push(sw);
 		}
 		if (updated.name !== oldName) {
+			if (!isMutableSource(target.source)) return result(`Cannot rename agent from immutable source '${target.source}'.`, true);
 			const renamed = renamePath("agent", target.filePath, updated.name, target.source, ctx.cwd);
 			if (renamed.error) return result(renamed.error, true);
 			updated.filePath = renamed.filePath!;
@@ -901,6 +903,7 @@ export function handleUpdate(params: ManagementParams, ctx: ManagementContext): 
 		warnings.push(...chainStepWarnings(ctx, updated.steps));
 	}
 	if (updated.name !== oldName) {
+		if (!isMutableSource(target.source)) return result(`Cannot rename chain from immutable source '${target.source}'.`, true);
 		const renamed = renamePath("chain", target.filePath, updated.name, target.source, ctx.cwd);
 		if (renamed.error) return result(renamed.error, true);
 		updated.filePath = renamed.filePath!;

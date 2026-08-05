@@ -1,71 +1,9 @@
-/**
- * Fleet Status Dock – Rendering (PHASE-04, Aurora-Politur in PHASE-08).
- *
- * Reine Renderfunktion: FleetAgentEntry[] -> string[]. Kein I/O, kein
- * eigener Zustand (Auswahl/Expansion werden vom Aufrufer als Parameter
- * uebergeben). Analog zu buildWidgetLines() im alten Async-Widget
- * (../tui/render.ts), aber unabhaengig vom AsyncJobState-Typ.
- *
- * PHASE-06: needs_attention sortiert jetzt strikt vor running (eigener Rang,
- * nicht mehr gleichrangig+updatedAt-Tiebreak) - ein Attention-Eintrag soll
- * nicht mehr rein durch Alter unter die MAX_DOCK_ROWS-Sichtgrenze rutschen
- * und unmarkiert in der "+N weitere"-Zeile verschwinden koennen. Die
- * Aktivitaetszeile eines needsAttention-Eintrags wird zusaetzlich in
- * "warning" statt "dim" gerendert, statt sich allein auf das ⚠-Glyphenzeichen
- * zu verlassen.
- *
- * PHASE-08 (Aurora-UI, Darstellung - kein Verhaltenswechsel):
- * 1. Jeder Zustand hat ein EIGENES Glyphenzeichen. Vorher teilten sich
- *    paused und stopped "■" in derselben Farbe und waren damit ohne
- *    Farbunterscheidung ununterscheidbar - die Regel "Status nicht
- *    ausschliesslich ueber Farbe kommunizieren" war faktisch verletzt.
- *    Zusaetzlich traegt jeder Nicht-Running-Zustand ein ausgeschriebenes
- *    Textlabel in der Statuszeile.
- * 2. Die Auswahl wird ueber drei redundante Kanaele markiert: "›"-Praefix
- *    (Glyphe), Akzentfarbe und Fettdruck.
- * 3. Feste Namensspalte je Terminalbreite (nameColumnWidth) statt frei
- *    fliessender Namen: die Aktivitaetsspalte beginnt dadurch in jeder Zeile an
- *    derselben Stelle und wandert nicht mit der Namenslaenge.
- * 4. Budgetbasierte Kuerzung statt reinem Zeilenende-Abschnitt: Laufzeit und
- *    Tokenzahl sind fixe Bestandteile und ueberleben immer; nur die
- *    Aktivitaetsbeschreibung wird auf das verbleibende Budget gekuerzt.
- *    Pfade darin werden ueber compactPath() auf die letzten beiden Segmente
- *    eingedampft ("…/plan-mode/index.ts") statt am Zeilenende abgeschnitten.
- * 5. Kopfzeile mit Zaehlern und - nur bei Tastaturfokus - eine Zeile mit den
- *    tatsaechlich verfuegbaren Tastenkuerzeln (siehe CONCEPT.md-Zielbild).
- *    Ohne Fokus entfaellt die Kuerzelzeile und die Hinweise "↓ select" und
- *    "Super+↓ jump" (PHASE-09: bewusstes, editorunabhaengiges Kuerzel, siehe
- *    fleet-dock-controller.ts) stehen stattdessen in der Kopfzeile - der
- *    Fussabdruck waechst gegenueber PHASE-04 damit auch ohne Fokus um genau
- *    die eine Kopfzeile.
- *
- * PHASE-09 (Uebersichtlichkeit, Nutzerfeedback nach Live-Einsatz):
- * 1. Laufzeit und Tokenzahl standen bisher direkt hinter der
- *    Aktivitaetsbeschreibung und damit je nach deren Laenge an einer anderen
- *    Spaltenposition - senkrechtes Scannen/Vergleichen war nicht moeglich.
- *    Beide Werte stehen jetzt in einer eigenen, fest breiten,
- *    rechtsbuendigen Spalte (statsBlockText()) am Zeilenende, unabhaengig von
- *    der Aktivitaetstextlaenge und der Verschachtelungstiefe (siehe Punkt 3).
- *    Ersetzt die widersprochene Aussage aus PHASE-08-Punkt 3 oben.
- * 2. Zwischen Namensspalte und Mittelteil steht jetzt eine reine
- *    Leerraum-Luecke statt eines "·"-Trenners - eine Trennzeichenebene
- *    weniger pro Zeile fuer mehr visuelle Ruhe.
- * 3. Verschachtelte Eintraege (entry.depth > 0, von einem anderen Agenten
- *    gestartet) werden um zwei Leerzeichen pro Ebene eingerueckt (INDENT_UNIT)
- *    - die Eltern/Kind-Hierarchie ist damit direkt im Dock sichtbar, nicht
- *    mehr nur in der "children:"-Liste des Inspectors. Die Statsspalte bleibt
- *    dabei unveraendert am selben Zeilenende ausgerichtet (die Einrueckung
- *    geht zulasten des Mittelteil-Budgets, nicht der Statsspalte).
- *
- * Bewusst NICHT enthalten: Spinner, Ticker oder sonstige Animationen. Das
- * Dock rendert ausschliesslich aus dem uebergebenen Zustand (Anforderung
- * "Kein permanenter schneller Spinner fuer jede Agentenzeile").
- */
+/** Compact, read-only rendering of the current FleetAgentEntry projection. */
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { formatDuration, formatTokens, shortenPath } from "../shared/formatters.ts";
 import type { FleetAgentEntry, FleetAgentState } from "../runs/shared/fleet-projection.ts";
-import { themeBold, truncLine } from "./render.ts";
+import { truncLine } from "./render.ts";
 
 type Theme = ExtensionContext["ui"]["theme"];
 type ThemeColor = Parameters<Theme["fg"]>[0];
@@ -172,21 +110,13 @@ function fitName(name: string, cell: number): string {
 	return name.padEnd(cell, " ");
 }
 
-/**
- * Feste, rechtsbuendige Statsspalte (Laufzeit · Tokens). PHASE-09: vorher
- * folgten Laufzeit und Tokenzahl direkt auf die Aktivitaetsbeschreibung und
- * standen dadurch in jeder Zeile an einer anderen Spaltenposition -
- * senkrechtes Scannen/Vergleichen war nicht moeglich (Nutzerfeedback). Beide
- * Werte werden jetzt einzeln auf eine feste Breite rechtsbuendig aufgefuellt,
- * sodass ihre Ziffern in jeder Zeile an derselben Stelle stehen, unabhaengig
- * von der Laenge der Aktivitaetsbeschreibung davor.
- */
+/** Runtime and token values stay aligned so rows remain easy to scan. */
 const STATS_DURATION_WIDTH = 6;
 const STATS_TOKENS_WIDTH = 5;
 const STATS_BLOCK_WIDTH = STATS_DURATION_WIDTH + SEPARATOR.length + STATS_TOKENS_WIDTH;
 const STATS_GAP = 2;
 
-/** Zwei Leerzeichen pro Verschachtelungsebene (PHASE-09: sichtbare Eltern/Kind-Hierarchie im Dock selbst, nicht nur im Inspector). */
+/** Two spaces per nesting level make parent/child relationships visible. */
 const INDENT_UNIT = "  ";
 
 function statsBlockText(entry: FleetAgentEntry, now: number): string {
@@ -224,20 +154,18 @@ function middleZoneText(entry: FleetAgentEntry, budget: number): string {
 	return parts.join(SEPARATOR);
 }
 
-export function entryLine(entry: FleetAgentEntry, isSelected: boolean, now: number, theme: Theme, width: number): string {
+export function entryLine(entry: FleetAgentEntry, now: number, theme: Theme, width: number): string {
 	const nameCell = nameColumnWidth(width);
 	const indent = INDENT_UNIT.repeat(entry.depth);
-	const prefix = isSelected ? theme.fg("accent", "› ") : "  ";
+	const prefix = "  ";
 	const glyph = stateGlyph(entry.state, theme);
 	const nameText = fitName(entry.agent, nameCell);
-	// Auswahl redundant markiert: Glyphe (›), Farbe (accent) und Fettdruck.
-	const name = themeBold(theme, isSelected ? theme.fg("accent", nameText) : nameText);
+	const name = nameText;
 
 	const fixedLeftWidth = 2 /* Praefix */ + indent.length + 2 /* Glyphe + Leerzeichen */ + nameCell + 2 /* Luecke nach Namen */;
 	const middleBudget = Math.max(0, width - fixedLeftWidth - STATS_BLOCK_WIDTH - STATS_GAP);
 
-	// PHASE-06: needsAttention faerbt Mittelteil und Statsspalte "warning" statt
-	// "dim" - das Glyphenzeichen allein reicht nicht als deutliche Anzeige.
+	// Attention is shown in warning color as well as with a distinct glyph.
 	const partColor = entry.needsAttention ? "warning" : "dim";
 	const middleText = middleZoneText(entry, middleBudget);
 	// Auffuellung bewusst AUSSERHALB des theme.fg()-Aufrufs: die Farbmarkierung
@@ -250,52 +178,11 @@ export function entryLine(entry: FleetAgentEntry, isSelected: boolean, now: numb
 	return truncLine(`${prefix}${indent}${glyph} ${name}  ${middle}${" ".repeat(STATS_GAP)}${stats}`, width);
 }
 
-function detailLines(entry: FleetAgentEntry, theme: Theme, width: number): string[] {
-	// PHASE-09: folgt der Einrueckung der Eintragszeile selbst, damit
-	// aufgeklappte Details sichtbar unter einem eingerueckten Kind-Eintrag
-	// stehen statt immer auf dieselbe Spalte zurueckzufallen.
-	const indent = `      ${INDENT_UNIT.repeat(entry.depth)}`;
-	const lines: string[] = [];
-	// Wie in middleZoneText(): der reine State-Fallback aus pickActivityDetail()
-	// ist hier keine zusaetzliche Information (das Glyphenzeichen und das
-	// Textlabel der Statuszeile sagen dasselbe).
-	if (entry.activityDetail && entry.activityDetail !== entry.state) {
-		lines.push(truncLine(theme.fg("dim", `${indent}⎿  ${compactActivityDetail(entry.activityDetail)}`), width));
-	}
-	if (entry.tokenUsage) {
-		lines.push(
-			truncLine(
-				theme.fg("dim", `${indent}tokens: ${formatTokens(entry.tokenUsage.input)} in / ${formatTokens(entry.tokenUsage.output)} out`),
-				width,
-			),
-		);
-	}
-	if (entry.transcriptPath) {
-		const staleSuffix = entry.transcriptPathMaybeStale ? " (moeglicherweise veraltet)" : "";
-		lines.push(truncLine(theme.fg("dim", `${indent}transcript: ${compactPath(entry.transcriptPath, 3)}${staleSuffix}`), width));
-	}
-	return lines;
-}
-
 export interface RenderFleetDockOptions {
 	width: number;
 	theme: Theme;
-	expandedKey?: string;
 	maxRows?: number;
 	now?: number;
-	// PHASE-06: Key eines Eintrags mit ausstehender Stop-Bestaetigung (erstes
-	// "s" wurde gedrueckt). Rendert eine explizite Bestaetigungszeile direkt
-	// unter dem betroffenen Eintrag.
-	stopArmedKey?: string;
-	// PHASE-08: true, waehrend das Dock Tastaturfokus haelt
-	// (FleetDockController.isActive()). Nur dann wird die Tastenkuerzelzeile
-	// gerendert - ohne Fokus waere sie irrefuehrend und kostet nur Hoehe.
-	active?: boolean;
-}
-
-function stopConfirmLine(entry: FleetAgentEntry, theme: Theme, width: number): string {
-	const indent = `      ${INDENT_UNIT.repeat(entry.depth)}`;
-	return truncLine(theme.fg("warning", `${indent}Stop bestaetigen: erneut 's' druecken (Escape zum Abbrechen)`), width);
 }
 
 /**
@@ -303,12 +190,11 @@ function stopConfirmLine(entry: FleetAgentEntry, theme: Theme, width: number): s
  * attention"). Der Attention-Zaehler erscheint nur, wenn es tatsaechlich einen
  * gibt, und wird als einziges Segment in "warning" gerendert.
  */
-export function dockHeaderLine(entries: FleetAgentEntry[], theme: Theme, width: number, active: boolean): string {
+export function dockHeaderLine(entries: FleetAgentEntry[], theme: Theme, width: number): string {
 	const activeCount = entries.filter((entry) => !TERMINAL_STATES.has(entry.state)).length;
 	const attentionCount = entries.filter((entry) => entry.needsAttention || entry.state === "needs_attention").length;
 	const segments = [theme.fg("dim", "AGENTS"), theme.fg("dim", `${activeCount} active`)];
 	if (attentionCount > 0) segments.push(theme.fg("warning", `${attentionCount} needs attention`));
-	if (!active) segments.push(theme.fg("dim", "↓ select"), theme.fg("dim", "Super+↓ jump"));
 	const dot = theme.fg("dim", "·");
 	return truncLine(`  ${segments.join(` ${dot} `)}`, width);
 }
@@ -319,39 +205,26 @@ export function dockHeaderLine(entries: FleetAgentEntry[], theme: Theme, width: 
  * FleetDockController (stop nur fuer stoppbare Async-Laeufe, dismiss nur fuer
  * terminale Top-Level-Eintraege).
  */
-export function dockHintLine(selected: FleetAgentEntry | undefined, theme: Theme, width: number): string {
-	const hints = ["↑↓ select", "enter inspect"];
-	if (selected && selected.source === "async" && selected.canStop && selected.asyncDir) hints.push("s stop");
-	if (selected && selected.depth === 0 && TERMINAL_STATES.has(selected.state)) hints.push("d dismiss");
-	hints.push("esc back");
-	return truncLine(theme.fg("dim", `  ${hints.join(SEPARATOR)}`), width);
-}
-
 /**
  * Rendert die Fleet-Status-Dock-Zeilen aus einer bereits gebauten
  * FleetAgentEntry-Liste. Enthaelt keine Aufrufe von buildFleetEntries()
  * selbst - der Aufrufer (fleet-dock-controller.ts) ist fuer Beschaffung,
  * Throttling und Key-basierte Selektion zustaendig.
  */
-export function renderFleetDock(entries: FleetAgentEntry[], selectedKey: string | undefined, opts: RenderFleetDockOptions): string[] {
-	const { width, theme, expandedKey, maxRows = MAX_DOCK_ROWS, now = Date.now(), stopArmedKey, active = false } = opts;
+export function renderFleetDock(entries: FleetAgentEntry[], opts: RenderFleetDockOptions): string[] {
+	const { width, theme, maxRows = MAX_DOCK_ROWS, now = Date.now() } = opts;
 	if (entries.length === 0) {
 		return [truncLine(theme.fg("dim", "keine aktiven Subagenten"), width)];
 	}
 	const sorted = sortFleetEntries(entries);
 	const visible = sorted.slice(0, maxRows);
 	const hidden = sorted.slice(maxRows);
-	const lines: string[] = [dockHeaderLine(sorted, theme, width, active)];
+	const lines: string[] = [dockHeaderLine(sorted, theme, width)];
 	for (const entry of visible) {
-		lines.push(entryLine(entry, entry.key === selectedKey, now, theme, width));
-		if (expandedKey === entry.key) lines.push(...detailLines(entry, theme, width));
-		if (stopArmedKey === entry.key) lines.push(stopConfirmLine(entry, theme, width));
+		lines.push(entryLine(entry, now, theme, width));
 	}
 	if (hidden.length > 0) {
 		lines.push(truncLine(theme.fg("dim", `  +${hidden.length} weitere`), width));
-	}
-	if (active) {
-		lines.push(dockHintLine(sorted.find((entry) => entry.key === selectedKey), theme, width));
 	}
 	return lines;
 }

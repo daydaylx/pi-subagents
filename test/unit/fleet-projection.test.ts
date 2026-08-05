@@ -314,13 +314,6 @@ describe("normalizeForegroundActive", () => {
 		assert.equal(entry.agent, "parallel");
 	});
 
-	it("derives canStop from the presence of an interrupt handle", () => {
-		const withInterrupt = makeForegroundControl({ interrupt: () => true });
-		const withoutInterrupt = makeForegroundControl({ interrupt: undefined });
-		assert.equal(normalizeForegroundActive(withInterrupt, { pending: [], now: 1000 }).canStop, true);
-		assert.equal(normalizeForegroundActive(withoutInterrupt, { pending: [], now: 1000 }).canStop, false);
-	});
-
 	it("flags needsAttention from currentActivityState", () => {
 		const control = makeForegroundControl({ currentActivityState: "needs_attention" });
 		const entry = normalizeForegroundActive(control, { pending: [], now: 1000 });
@@ -372,14 +365,13 @@ describe("normalizeForegroundRecent", () => {
 		assert.equal(parent?.state, "error");
 	});
 
-	it("marks detached children and preserves their transcript path", () => {
+	it("marks detached children", () => {
 		const run = makeForegroundResumeRun({
 			children: [makeForegroundResumeChild({ status: "detached", transcriptPath: "/tmp/t.jsonl" })],
 		});
 		const [, child] = normalizeForegroundRecent(run, new Set());
 		assert.equal(child?.detached, true);
 		assert.equal(child?.state, "running");
-		assert.equal(child?.transcriptPath, "/tmp/t.jsonl");
 	});
 
 	it("falls back to updatedAt for startedAt, since resume runs carry no startedAt field", () => {
@@ -397,26 +389,6 @@ describe("normalizeAsyncJobState", () => {
 		const [finishedEntry] = normalizeAsyncJobState(justFinishedJob, { pending: [], now: 1000 });
 		assert.equal(activeEntry.kind, "active");
 		assert.equal(finishedEntry.kind, "recent");
-	});
-
-	it("marks active jobs as stoppable and recent jobs as not stoppable", () => {
-		const [activeEntry] = normalizeAsyncJobState(makeAsyncJobState({ status: "running" }), { pending: [], now: 1000 });
-		const [recentEntry] = normalizeAsyncJobState(makeAsyncJobState({ status: "stopped" }), { pending: [], now: 1000 });
-		assert.equal(activeEntry.canStop, true);
-		assert.equal(recentEntry.canStop, false);
-	});
-
-	it("exposes asyncDir/pid on the parent entry for a live job, not on step entries", () => {
-		const job = makeAsyncJobState({
-			asyncDir: "/tmp/async-1",
-			pid: 4242,
-			steps: [{ index: 0, agent: "worker-a", status: "running" }],
-		});
-		const [parentEntry, stepEntry] = normalizeAsyncJobState(job, { pending: [], now: 1000 });
-		assert.equal(parentEntry?.asyncDir, "/tmp/async-1");
-		assert.equal(parentEntry?.pid, 4242);
-		assert.equal(stepEntry?.asyncDir, undefined);
-		assert.equal(stepEntry?.pid, undefined);
 	});
 
 	it("builds one row per step with stable composite keys", () => {
@@ -442,15 +414,6 @@ describe("normalizeAsyncJobState", () => {
 		assert.equal(entries[1]?.thinking, "high");
 	});
 
-	it("never marks transcriptPathMaybeStale for entries sourced from the live in-memory map", () => {
-		const job = makeAsyncJobState({
-			status: "complete",
-			steps: [{ index: 0, agent: "worker-a", status: "completed" }],
-		});
-		const entries = normalizeAsyncJobState(job, { pending: [], now: 1000 });
-		assert.equal(entries[1]?.transcriptPathMaybeStale, false);
-	});
-
 	it("escalates a step to error when its watchdog has failed", () => {
 		const job = makeAsyncJobState({
 			steps: [{ index: 0, agent: "worker-a", status: "running", watchdog: makeWatchdogSnapshot({ phase: "failed" }) }],
@@ -473,28 +436,12 @@ describe("normalizeAsyncJobState", () => {
 });
 
 describe("normalizeAsyncRunSummary", () => {
-	it("flags transcriptPathMaybeStale for terminal steps, since disk summaries never carry transcriptPath", () => {
-		const run = makeAsyncRunSummary({
-			state: "complete",
-			steps: [{ index: 0, agent: "worker-a", status: "completed" }],
-		});
-		const entries = normalizeAsyncRunSummary(run, { now: 1000 });
-		assert.equal(entries[1]?.transcriptPathMaybeStale, true);
-		assert.equal(entries[1]?.transcriptPath, undefined);
-	});
-
 	it("derives kind active for a still-running disk summary", () => {
 		const run = makeAsyncRunSummary({ state: "running", steps: [{ index: 0, agent: "worker-a", status: "running" }] });
 		const [entry] = normalizeAsyncRunSummary(run, { now: 1000 });
 		assert.equal(entry.kind, "active");
 	});
 
-	it("exposes asyncDir on the parent entry without a pid (disk summaries carry no pid)", () => {
-		const run = makeAsyncRunSummary({ asyncDir: "/tmp/async-9", state: "running" });
-		const [entry] = normalizeAsyncRunSummary(run, { now: 1000 });
-		assert.equal(entry.asyncDir, "/tmp/async-9");
-		assert.equal(entry.pid, undefined);
-	});
 });
 
 describe("normalizeAsyncRunSummary model/thinking", () => {
@@ -508,7 +455,7 @@ describe("normalizeAsyncRunSummary model/thinking", () => {
 	});
 });
 
-describe("KNOWN GAP 6: model/thinking are undefined outside async steps", () => {
+describe("model/thinking availability", () => {
 	it("leaves model/thinking undefined on foreground active entries", () => {
 		const control = makeForegroundControl({ mode: "single", currentAgent: "reviewer" });
 		const entry = normalizeForegroundActive(control, { pending: [], now: 1000 });
@@ -525,27 +472,6 @@ describe("KNOWN GAP 6: model/thinking are undefined outside async steps", () => 
 		for (const entry of entries) {
 			assert.equal(entry.model, undefined);
 			assert.equal(entry.thinking, undefined);
-		}
-	});
-});
-
-describe("KNOWN GAP 7: asyncDir/pid are undefined outside async parent entries", () => {
-	it("leaves asyncDir/pid undefined on foreground active entries", () => {
-		const control = makeForegroundControl({ mode: "single", currentAgent: "reviewer" });
-		const entry = normalizeForegroundActive(control, { pending: [], now: 1000 });
-		assert.equal(entry.asyncDir, undefined);
-		assert.equal(entry.pid, undefined);
-	});
-
-	it("leaves asyncDir/pid undefined on nested run/step entries", () => {
-		const run = makeNestedRunSummary({
-			state: "running",
-			steps: [{ agent: "worker-a", status: "running" }],
-		});
-		const entries = normalizeNestedRun(run, "foreground:active:run-1", 1, { now: 1000, source: "foreground", rootRunId: "run-1" });
-		for (const entry of entries) {
-			assert.equal(entry.asyncDir, undefined);
-			assert.equal(entry.pid, undefined);
 		}
 	});
 });

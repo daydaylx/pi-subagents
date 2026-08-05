@@ -1,5 +1,5 @@
 <p>
-  <img src="https://raw.githubusercontent.com/nicobailon/pi-subagents/main/banner.png" alt="pi-subagents" width="1100">
+  <img src="https://raw.githubusercontent.com/daydaylx/pi-subagents/main/banner.png" alt="pi-subagents" width="1100">
 </p>
 
 # pi-subagents
@@ -11,10 +11,10 @@ https://github.com/user-attachments/assets/702554ec-faaf-4635-80aa-fb5d6e292fd1
 ## Installation
 
 ```bash
-pi install npm:pi-subagents
+pi install git:github.com/daydaylx/pi-subagents
 ```
 
-That is the only required step. You can add optional pieces later.
+This installs this fork directly from GitHub; no npm publication is required.
 
 ## Try this first
 
@@ -292,37 +292,31 @@ Check whether subagents and intercom are set up correctly.
 
 ## Fleet Status Dock
 
-The Fleet Status Dock is an interactive, always-visible list of the agents that are running right now. It replaces the compact async widget with one concrete line per agent - foreground, async, parallel, chain and nested runs all appear in the same list - and opens a detail inspector with the live transcript.
+The Fleet Status Dock is a compact, read-only list of current foreground, async, parallel, chain, and nested runs. When enabled, it is the only persistent status widget.
 
 It is off by default. Enable it in `~/.pi/agent/extensions/subagent/config.json`:
 
 ```json
-{ "ui": { "fleetView": true, "fleetViewPlacement": "belowEditor", "asyncWidget": false } }
+{ "ui": { "fleetView": true, "fleetViewPlacement": "belowEditor" } }
 ```
 
-`fleetView: true` already suppresses the old async widget on its own. Setting `asyncWidget: false` makes that explicit and keeps the widget hidden regardless.
+`fleetView: true` disables the old async widget at startup. The dock never receives keyboard focus or terminal input.
 
 ### What a line shows
 
-While the dock holds the keyboard focus, with `worker` selected and `scout` running as its child (120 columns):
+With `worker` and its child `scout` running (120 columns):
 
 ```text
   AGENTS · 4 active · 1 needs attention
   ⚠ reviewer                  watchdog: stalled                                                            18.0s ·  7.4k
-› ● worker                    tool: edit (…/plan-mode/index.ts)                                            42.0s ·   18k
+  ● worker                    tool: edit (…/plan-mode/index.ts)                                            42.0s ·   18k
     ● scout                     tool: grep                                                                  9.0s ·  3.1k
   ‖ implementation-planner    paused · waiting: supervisor decision                                        2m10s ·   12k
   ✓ oracle                    done                                                                          4m0s ·   41k
-  ↑↓ select · enter inspect · s stop · esc back
 ```
 
 The counter in the header counts only agents that are still going, so the
-finished `oracle` is listed but not counted. Without the keyboard focus the
-shortcut line is not shown at all and the header ends in `· ↓ select · Super+↓ jump` instead:
-
-```text
-  AGENTS · 4 active · 1 needs attention · ↓ select · Super+↓ jump
-```
+finished `oracle` is listed but not counted.
 
 Every state has its own glyph, so status never depends on color alone:
 
@@ -335,44 +329,13 @@ Every state has its own glyph, so status never depends on color alone:
 | `✗` | `error` | failed |
 | `■` | `stopped` | stopped through the control channel |
 
-The selected line is marked three ways at once: a `›` prefix, the accent color, and bold text. Agent names sit in a fixed-width column that scales with the terminal (16 columns at 80, 24 at 120 and above), so the status columns do not move when an agent name or a runtime changes. Runtime and token counts sit in their own fixed-width, right-aligned column at the end of every line, so their digits line up vertically regardless of how long the activity description in front of them is - a long description is shortened first, and paths inside it collapse to their last two segments (`…/plan-mode/index.ts`), never the runtime or tokens. A nested agent (spawned by another one, like `scout` above) is indented two spaces per nesting level relative to its parent, so the hierarchy is visible in the dock itself, not only in the inspector's `children:` list. Below roughly 45 columns there is no budget left to shorten anything into, and the line is simply cut at the right edge.
+Agent names, runtime, and token counts keep stable columns; long activity text is shortened first. Nested agents are indented two spaces per level. Below roughly 45 columns lines are clipped at the right edge.
 
 At most six agents are listed at once; the rest are summarized in a trailing counter line. Finished entries disappear automatically five minutes after their last update.
 
 The dock renders purely from the current state. There is no spinner, ticker, or other animation, and no permanent box drawn around it.
 
-### Keyboard shortcuts
-
-The dock only takes keyboard input while the editor is empty, or any time at all via `Super+↓`. Press `↓` on an empty editor, or `Super+↓` regardless of what is in the editor, to focus the dock; changing the editor's text afterwards releases the focus again (measured against whatever the editor held at the moment of activation, so pre-existing text from a `Super+↓` jump does not immediately release it on the very next key). The shortcut line at the bottom of the dock is shown only while it holds focus, and lists only the shortcuts that actually apply to the selected entry.
-
-| Key | Where | Action |
-| --- | ----- | ------ |
-| `↓` | empty editor | focus the dock |
-| `Super+↓` | anywhere | focus the dock, even while the editor has text |
-| `↑` / `↓` | dock | move the selection |
-| `Enter` | dock | open the inspector for the selected agent |
-| `s` | dock, inspector | arm a stop; press `s` again to confirm, any other key cancels |
-| `d` | dock | dismiss a finished top-level entry |
-| `Esc` | dock | release the keyboard focus |
-| `↑` / `↓` | inspector | scroll the transcript (auto-follows the tail until you scroll up) |
-| `PgUp` / `PgDn` | inspector | scroll the transcript by a page |
-| `Home` / `End` | inspector | jump to the start or the tail of the transcript |
-| `Space` | inspector | expand or collapse tool results |
-| `Esc` | inspector | close the inspector; the dock keeps its focus |
-
-`Enter` is swallowed while the inspector is open - it is reserved for drilling into a child run and currently does nothing, but it must not reach the editor behind the inspector. The shortcut line at the bottom of the inspector is a reminder of the most-used keys, not the full list; `Home` and `End` are not repeated there to keep it inside 80 columns.
-
-`s` only offers itself for async runs that can actually be stopped, and it uses the same file-based stop channel as `/subagents-stop`, so the run is persisted as `stopped` instead of as a timeout. There is no stop for foreground or nested runs - those only support interrupt, which pauses rather than terminates. `d` only applies to finished top-level entries; it hides the entry locally and never rewrites `status.json` or any other artifact.
-
-### Going back to the old widget
-
-The dock is additive - the previous async widget is untouched and remains the fallback:
-
-```json
-{ "ui": { "fleetView": false, "asyncWidget": true } }
-```
-
-Restart the session (or reload the extension) after changing the config. With `fleetView: false` nothing belonging to the dock is registered at all - no widget, no input handler, no timer - and the async widget behaves exactly as it did before.
+For details, use `/subagents-fleet` or `subagent({ action: "status", view: "fleet" })`; use `view: "transcript"` for a selected run. Stop a top-level async run with `/subagents-stop` or `subagent({ action: "stop", id })`. With `fleetView: false`, the existing async widget remains the fallback.
 
 ## Recommended orchestration pattern (scaffolding)
 
@@ -1299,7 +1262,7 @@ Hides the persistent async-subagent widget while preserving background lifecycle
 { "ui": { "fleetView": true } }
 ```
 
-Enables the interactive Fleet Status Dock and, while it is active, suppresses the old async widget. Defaults to `false`. See [Fleet Status Dock](#fleet-status-dock) for the full description, the keyboard shortcuts, and the fallback path.
+Enables the compact, read-only Fleet Status Dock. When enabled it is the only persistent status widget; when disabled, the existing async widget is the fallback. Defaults to `false`.
 
 ### `ui.fleetViewPlacement`
 
@@ -1307,15 +1270,7 @@ Enables the interactive Fleet Status Dock and, while it is active, suppresses th
 { "ui": { "fleetViewPlacement": "belowEditor" } }
 ```
 
-Where the Fleet Status Dock widget is placed. Defaults to `"belowEditor"`; the same placement is used for the inspector.
-
-### `ui.asyncWidget`
-
-```json
-{ "ui": { "asyncWidget": false } }
-```
-
-Hides the async widget. Takes precedence over `ui.showAsyncWidget` when set. Only the hiding direction is implemented: `asyncWidget: false` reliably hides the widget, while `asyncWidget: true` does not force it back on if `ui.showAsyncWidget` is `false`.
+Where the Fleet Status Dock widget is placed. Defaults to `"belowEditor"`.
 
 ### `toolDescriptionMode`
 
