@@ -24,7 +24,7 @@ import { cleanupAllArtifactDirs, cleanupOldArtifacts, getArtifactsDir } from "..
 import { resolveCurrentSessionId } from "../shared/session-identity.ts";
 import { cleanupOldChainDirs } from "../shared/settings.ts";
 import { clearLegacyResultAnimationTimer, renderWidget, renderSubagentResult } from "../tui/render.ts";
-import { SubagentParams, WaitParams } from "./schemas.ts";
+import { HarnessSubagentParams, SubagentParams, WaitParams } from "./schemas.ts";
 import { createSubagentExecutor, type SubagentParamsLike } from "../runs/foreground/subagent-executor.ts";
 import { createAsyncJobTracker } from "../runs/background/async-job-tracker.ts";
 import { createResultWatcher } from "../runs/background/result-watcher.ts";
@@ -464,11 +464,13 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		}, 0);
 	}
 
-	const tool: ToolDefinition<typeof SubagentParams, Details> = {
+	const toolParams = config.toolDescriptionMode === "custom" ? HarnessSubagentParams : SubagentParams;
+
+	const tool: ToolDefinition<typeof toolParams, Details> = {
 		name: "subagent",
 		label: "Subagent",
 		description: buildSubagentToolDescription(config),
-		parameters: SubagentParams,
+		parameters: toolParams,
 
 		execute(id, params, signal, onUpdate, ctx) {
 		return executeSubagentCollapsed(id, params as unknown as SubagentParamsLike, signal ?? new AbortController().signal, onUpdate, ctx);

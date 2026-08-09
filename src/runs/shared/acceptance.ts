@@ -710,19 +710,159 @@ export function aggregateAcceptanceReport(input: {
 	};
 }
 
+const CRITICAL_VERIFY_PATTERNS: Array<[RegExp, string]> = [
+	[
+		/\brm\b[^;&|]*(?:^|\s)["']?\/(?:[/.])*["']?(?=\s|$)/i,
+		"deletes the root filesystem",
+	],
+	[
+		/\brm\b[^;&|]*(?:\{[^}]*\}|`|\$(?:\(|\{[^}]*\}|['"]|[A-Za-z_][A-Za-z0-9_]*|[0-9?*#@!_-]))/,
+		"deletes via a dynamically expanded path",
+	],
+	[
+		/\bsudo\b[^;&|]*\brm\s+(?:-[^\s]*r[^\s]*f|-[^\s]*f[^\s]*r)\b/i,
+		"sudo rm -rf",
+	],
+	[
+		/(?:\b(?:rm|rmdir|unlink|trash)\b|\bgio\s+trash\b)[^;&|]*(?:[\s/\\])\.git(?:[/\\\s]|$)/i,
+		"deletes .git",
+	],
+	[
+		/\bchmod\s+(?:-[^\s]*R[^\s]*\s+)?(?:0?777|a\+rwx)\b/i,
+		"unsafe recursive file permissions",
+	],
+	[
+		/\bchown\s+(?:-[^\s]*R[^\s]*\s+)?[^;&|]*(?:\/etc|\/usr|\/bin|\/sbin|\/boot|\/var)(?:\/|\s|$)/i,
+		"recursive ownership change on a system path",
+	],
+	[
+		/\b(?:curl|wget)\b[^|;&]*\|\s*(?:sudo\s+)?(?:sh|bash|zsh|dash|ksh)\b/i,
+		"download-to-shell pipeline",
+	],
+];
+
+function matchesCriticalVerifyPattern(command: string): string | undefined {
+	for (const [pattern, reason] of CRITICAL_VERIFY_PATTERNS) {
+		if (pattern.test(command)) return reason;
+	}
+	return undefined;
+}
+
+/**
+ * Safely resolve and validate the cwd for a verify command. Returns the
+ * resolved absolute path, or an error message if the path escapes the
+ * project root or traverses a symlink.
+ */
+function resolveVerifyCwd(rawCwd: string | undefined, defaultCwd: string): { cwd: string } | { error: string } {
+	const candidate = rawCwd ? path.resolve(defaultCwd, rawCwd) : defaultCwd;
+	const rel = path.relative(defaultCwd, candidate);
+	if (rel !== "" && (rel.startsWith("..") || path.isAbsolute(rel))) {
+		return { error: `cwd '${rawCwd}' escapes the project root` };
+	}
+	// Reject symlink escapes: resolve the physical path when the directory
+	// exists so a symlink pointing outside the project is caught.
+	if (fs.existsSync(candidate)) {
+		try {
+			const physicalCwd = fs.realpathSync(candidate);
+			const physicalRoot = fs.realpathSync(defaultCwd);
+			const physicalRel = path.relative(physicalRoot, physicalCwd);
+			if (physicalRel !== "" && (physicalRel.startsWith("..") || path.isAbsolute(physicalRel))) {
+				return { error: `cwd '${rawCwd}' resolves outside the project root via symlink` };
+			}
+		} catch {
+			return { error: `cwd '${rawCwd}' could not be resolved` };
+		}
+	}
+	return { cwd: candidate };
+}
+
+/**
+ * Split a command string into program + args without a shell.
+ *
+ * Uses a simple whitespace split that rejects shell metacharacters
+ * (chaining, redirection, command substitution, variable expansion).
+ * Commands that rely on shell features are blocked rather than passed
+ * through `shell: true`.
+ */
+function parseCommandString(raw: string): { program: string; args: string[] } | { error: string } {
+	const trimmed = raw.trim();
+	if (!trimmed) return { error: "empty command" };
+
+	// Block shell metacharacters that cannot be safely represented as
+	// program + args.
+	const SHELL_META = /[;&|`$(){}\[\]<>!\\'"#~*?]/;
+	if (SHELL_META.test(trimmed)) {
+		return {
+			error: `command contains shell metacharacters (${trimmed.match(SHELL_META)?.[0]}); use a simple program + args form`,
+		};
+	}
+
+	// Simple whitespace split: the first token is the program, the rest
+	// are arguments. This deliberately does not handle quoting — quoted
+	// strings would have been caught by SHELL_META above.
+	const tokens = trimmed.split(/\s+/);
+	return { program: tokens[0], args: tokens.slice(1) };
+}
+
 function runVerifyCommand(command: AcceptanceVerifyCommand, defaultCwd: string, options: { signal?: AbortSignal; abortMessage?: string } = {}): Promise<AcceptanceVerifyResult> {
 	return new Promise((resolve) => {
 		const startedAt = Date.now();
-		const cwd = command.cwd ? path.resolve(defaultCwd, command.cwd) : defaultCwd;
+
+		// Validate cwd: must stay inside the project root.
+		const cwdResult = resolveVerifyCwd(command.cwd, defaultCwd);
+		if ("error" in cwdResult) {
+			resolve({
+				id: command.id,
+				command: command.command,
+				cwd: defaultCwd,
+				durationMs: 0,
+				exitCode: null,
+				status: "failed",
+				stderr: `Verify command blocked: ${cwdResult.error}`,
+			});
+			return;
+		}
+		const cwd = cwdResult.cwd;
+
+		// Block known catastrophic patterns before parsing.
+		const criticalReason = matchesCriticalVerifyPattern(command.command);
+		if (criticalReason) {
+			resolve({
+				id: command.id,
+				command: command.command,
+				cwd,
+				durationMs: 0,
+				exitCode: null,
+				status: "failed",
+				stderr: `Verify command blocked by security filter: ${criticalReason}`,
+			});
+			return;
+		}
+
+		// Parse into program + args; block shell metacharacters.
+		const parsed = parseCommandString(command.command);
+		if ("error" in parsed) {
+			resolve({
+				id: command.id,
+				command: command.command,
+				cwd,
+				durationMs: 0,
+				exitCode: null,
+				status: "failed",
+				stderr: `Verify command blocked: ${parsed.error}`,
+			});
+			return;
+		}
+
 		let stdout = "";
 		let stderr = "";
 		let timedOut = false;
 		let settled = false;
 		let hardKill: NodeJS.Timeout | undefined;
-		const child = spawn(command.command, {
+		const child = spawn(parsed.program, parsed.args, {
 			cwd,
 			env: { ...process.env, ...(command.env ?? {}) },
-			shell: true,
+			shell: false,
 			stdio: ["ignore", "pipe", "pipe"],
 			windowsHide: true,
 		});

@@ -296,6 +296,49 @@ const SubagentParamsSchema = Type.Object({
 
 export const SubagentParams = keepTopLevelParameterDescriptions(SubagentParamsSchema);
 
+// ---------------------------------------------------------------------------
+// Harness-reduced schema — only the fields this harness actually uses.
+// Controlled by toolSchemaMode: "harness" in config.json.
+// ---------------------------------------------------------------------------
+
+const HarnessSubagentParamsSchema = Type.Object({
+	agent: Type.Optional(Type.String({ description: "Agent name (SINGLE mode) or target for management get/update/delete" })),
+	task: Type.Optional(Type.String({ description: "Task (SINGLE mode, optional for self-contained agents)" })),
+	action: Type.Optional(Type.String({
+		description: "Management/control action only. Must be omitted for execution mode (single, parallel, or chain)."
+	})),
+	id: Type.Optional(Type.String({
+		description: "Run id or prefix for action='status', action='interrupt', action='stop', action='resume', or action='append-step'."
+	})),
+	dir: Type.Optional(Type.String({
+		description: "Async run directory for action='status', action='stop', action='resume', or action='steer'."
+	})),
+	context: Type.Optional(Type.String({
+		enum: ["fresh", "fork"],
+		description: "'fresh' or 'fork' to branch from parent session. Explicit context overrides every child in the invocation. If omitted, each requested agent uses its own defaultContext; agents without defaultContext: 'fork' run fresh.",
+	})),
+	async: Type.Optional(Type.Boolean({ description: "Run in background (default: false, or per config)" })),
+	timeoutMs: Type.Optional(Type.Integer({ minimum: 1, description: "Optional run-level timeout in ms for foreground and async/background runs. Alias of maxRuntimeMs." })),
+	maxRuntimeMs: Type.Optional(Type.Integer({ minimum: 1, description: "Alias of timeoutMs for optional run-level timeout in foreground and async/background runs." })),
+	turnBudget: Type.Optional(TurnBudgetOverride),
+	toolBudget: Type.Optional(ToolBudgetOverride),
+	cwd: Type.Optional(Type.String()),
+	artifacts: Type.Optional(Type.Boolean({ description: "Write debug artifacts (default: true)" })),
+	clarify: Type.Optional(Type.Boolean({ description: "Show TUI to preview/edit before execution. Explicit clarify: true keeps the run foreground for the clarify UI; omitted clarify can still run in the background when async: true is set." })),
+	output: Type.Optional(Type.Unsafe({
+		anyOf: [
+			{ type: "string" },
+			{ type: "boolean" },
+		],
+		description: "Output file for single agent (string), or false to disable. Relative paths resolve against cwd.",
+	})),
+	outputMode: Type.Optional(OutputModeOverride),
+	skill: Type.Optional(SkillOverride),
+	model: Type.Optional(Type.String({ description: "Override model for single agent (e.g. 'anthropic/claude-sonnet-4')" })),
+});
+
+export const HarnessSubagentParams = keepTopLevelParameterDescriptions(HarnessSubagentParamsSchema);
+
 const WaitParamsSchema = Type.Object({
 	id: Type.Optional(Type.String({
 		description: "Run id or prefix to wait for one specific run. Omit to wait across every active async run started in this session.",
