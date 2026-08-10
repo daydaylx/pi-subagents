@@ -12,6 +12,7 @@ import {
 	type ExtensionConfig,
 	type SubagentState,
 } from "../shared/types.ts";
+import { HARNESS_MANAGEMENT_ACTIONS, resolveToolSchemaMode } from "./schemas.ts";
 
 interface DoctorPaths {
 	tempRootDir: string;
@@ -162,6 +163,21 @@ function formatIntercomDiagnostic(diagnostic: IntercomBridgeDiagnostic, context:
 	return lines;
 }
 
+/**
+ * The two settings are independent and easy to confuse, so the report names
+ * both and spells out which actions the active parameter surface accepts.
+ */
+function formatToolSurfaceSection(config: ExtensionConfig): string[] {
+	const schemaMode = resolveToolSchemaMode(config, () => {});
+	return [
+		`- tool description mode: ${config.toolDescriptionMode ?? "full"}`,
+		`- tool schema mode: ${schemaMode}`,
+		schemaMode === "harness"
+			? `- accepted actions: ${HARNESS_MANAGEMENT_ACTIONS.join(", ")} (single execution otherwise; any other parameter is rejected)`
+			: "- accepted actions: full management surface",
+	];
+}
+
 function formatPermissionSystemSection(): string[] {
 	const lines: string[] = [];
 	const parentSession = process.env["PI_SUBAGENT_PARENT_SESSION"] ?? "";
@@ -198,6 +214,9 @@ export function buildDoctorReport(input: DoctorReportInput): string {
 		"",
 		"Discovery",
 		...formatDiscovery(input, deps),
+		"",
+		"Tool surface",
+		...formatToolSurfaceSection(input.config),
 		"",
 		"Permission system",
 		...formatPermissionSystemSection(),

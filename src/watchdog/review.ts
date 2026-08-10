@@ -35,10 +35,14 @@ type WatchdogContextProvider = WatchdogReviewContext | (() => WatchdogReviewCont
 
 type RegistryModel = Model<any>;
 
+/**
+ * What the model registry actually resolves for a review request. Provider env
+ * used to be part of this, but neither `ResolvedRequestAuth` nor
+ * `SimpleStreamOptions` carries it any more, so forwarding it was a no-op.
+ */
 interface WatchdogReviewAuth {
 	apiKey?: string;
 	headers?: Record<string, string>;
-	env?: Record<string, string>;
 }
 
 export interface WatchdogReviewModelSelection {
@@ -114,7 +118,6 @@ async function resolveReviewAuth(ctx: WatchdogReviewContext, model: RegistryMode
 	return {
 		...(auth.apiKey ? { apiKey: auth.apiKey } : {}),
 		...(auth.headers ? { headers: auth.headers } : {}),
-		...("env" in auth && auth.env && typeof auth.env === "object" ? { env: auth.env as Record<string, string> } : {}),
 	};
 }
 

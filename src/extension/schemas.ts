@@ -3,6 +3,7 @@
  */
 
 import { Type } from "typebox";
+import type { ExtensionConfig, ToolSchemaMode } from "../shared/types.ts";
 
 function keepTopLevelParameterDescriptions<T>(schema: T): T {
 	return pruneNestedDescriptions(schema, []) as T;
@@ -298,20 +299,29 @@ export const SubagentParams = keepTopLevelParameterDescriptions(SubagentParamsSc
 
 // ---------------------------------------------------------------------------
 // Harness-reduced schema — only the fields this harness actually uses.
-// Controlled by toolSchemaMode: "harness" in config.json.
+// Selected by toolSchemaMode: "harness" in config.json.
+//
+// The reduction is a real capability boundary, not a hint: `action` is a closed
+// enum and the object rejects additional properties, so chain, parallel, agent
+// CRUD, scheduling, worktrees, sharing, watchdog, resume, steer and append-step
+// fail argument validation before the executor ever sees them.
 // ---------------------------------------------------------------------------
 
+/** The only management actions the reduced surface accepts. */
+export const HARNESS_MANAGEMENT_ACTIONS = ["list", "status", "stop", "interrupt"] as const;
+
 const HarnessSubagentParamsSchema = Type.Object({
-	agent: Type.Optional(Type.String({ description: "Agent name (SINGLE mode) or target for management get/update/delete" })),
+	agent: Type.Optional(Type.String({ description: "Agent name (SINGLE mode)" })),
 	task: Type.Optional(Type.String({ description: "Task (SINGLE mode, optional for self-contained agents)" })),
 	action: Type.Optional(Type.String({
-		description: "Management/control action only. Must be omitted for execution mode (single, parallel, or chain)."
+		enum: [...HARNESS_MANAGEMENT_ACTIONS],
+		description: "Management action: 'list' the available agents, or 'status'/'stop'/'interrupt' a run. Must be omitted to execute a single agent.",
 	})),
 	id: Type.Optional(Type.String({
-		description: "Run id or prefix for action='status', action='interrupt', action='stop', action='resume', or action='append-step'."
+		description: "Run id or prefix for action='status', action='stop' or action='interrupt'."
 	})),
 	dir: Type.Optional(Type.String({
-		description: "Async run directory for action='status', action='stop', action='resume', or action='steer'."
+		description: "Async run directory for action='status' or action='stop'."
 	})),
 	context: Type.Optional(Type.String({
 		enum: ["fresh", "fork"],
@@ -335,9 +345,37 @@ const HarnessSubagentParamsSchema = Type.Object({
 	outputMode: Type.Optional(OutputModeOverride),
 	skill: Type.Optional(SkillOverride),
 	model: Type.Optional(Type.String({ description: "Override model for single agent (e.g. 'anthropic/claude-sonnet-4')" })),
-});
+}, { additionalProperties: false });
 
 export const HarnessSubagentParams = keepTopLevelParameterDescriptions(HarnessSubagentParamsSchema);
+
+function isToolSchemaMode(value: unknown): value is ToolSchemaMode {
+	return value === "full" || value === "harness";
+}
+
+/**
+ * Resolve the configured parameter surface. Unknown values fall back to the
+ * full schema and say so, because silently reducing the surface would make a
+ * typo look like a deliberate capability cut.
+ */
+export function resolveToolSchemaMode(
+	config: Pick<ExtensionConfig, "toolSchemaMode">,
+	warn: (message: string) => void = console.warn,
+): ToolSchemaMode {
+	const mode = config.toolSchemaMode;
+	if (mode === undefined) return "full";
+	if (isToolSchemaMode(mode)) return mode;
+	warn(`[pi-subagents] Ignoring invalid toolSchemaMode ${JSON.stringify(mode)}; expected "full" or "harness".`);
+	return "full";
+}
+
+/** The tool parameter schema for the configured surface. */
+export function subagentToolParameters(
+	config: Pick<ExtensionConfig, "toolSchemaMode">,
+	warn?: (message: string) => void,
+): typeof SubagentParams | typeof HarnessSubagentParams {
+	return resolveToolSchemaMode(config, warn) === "harness" ? HarnessSubagentParams : SubagentParams;
+}
 
 const WaitParamsSchema = Type.Object({
 	id: Type.Optional(Type.String({

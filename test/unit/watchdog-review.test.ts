@@ -287,7 +287,10 @@ describe("main watchdog review adapter", () => {
 		assert.equal(calls[0]?.model, current);
 		assert.equal(calls[0]?.options?.apiKey, "key-github-copilot-gpt-session");
 		assert.equal(calls[0]?.options?.reasoning, "high");
-		assert.deepEqual(calls[0]?.options?.env, { WATCHDOG_PROVIDER: "github-copilot" });
+		// The registry resolves an api key and headers; provider env is no longer
+		// part of the request auth or of the stream options, so nothing forwards it.
+		assert.deepEqual(calls[0]?.options?.headers, { "x-model": "gpt-session" });
+		assert.equal(calls[0]?.options?.env, undefined);
 	});
 
 	it("resolves configured model suffixes and thinking deterministically", async () => {

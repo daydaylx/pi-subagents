@@ -1021,6 +1021,17 @@ export interface ProactiveSkillSubagentsConfig {
 
 export type ToolDescriptionMode = "full" | "compact" | "custom";
 
+/**
+ * Parameter surface registered for the parent-facing `subagent` tool.
+ *
+ * "full" is the complete schema. "harness" is the reduced surface a host needs
+ * that only runs single subagents: SINGLE execution plus the four management
+ * actions `list`, `status`, `stop` and `interrupt`. It is deliberately its own
+ * setting — the visible tool *description* is chosen by `toolDescriptionMode`
+ * and says nothing about which parameters are accepted.
+ */
+export type ToolSchemaMode = "full" | "harness";
+
 export interface ScheduledRunsConfig {
 	enabled?: boolean;
 	maxLatenessMs?: number;
@@ -1045,6 +1056,8 @@ export interface ExtensionConfig {
 	asyncByDefault?: boolean;
 	/** Tool description variant registered for the parent-facing subagent tool. Defaults to full. */
 	toolDescriptionMode?: ToolDescriptionMode;
+	/** Parameter surface registered for the parent-facing subagent tool. Defaults to full. */
+	toolSchemaMode?: ToolSchemaMode;
 	forceTopLevelAsync?: boolean;
 	waitTool?: WaitToolConfig;
 	defaultSessionDir?: string;

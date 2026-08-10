@@ -8,10 +8,12 @@
 - Added an opt-in read-only subagent watchdog that reviews actual repo edits at safe agent-end boundaries, with visible warnings, main and child watchdog coordination, strong complementary model recommendations, changed-file TypeScript/JavaScript LSP diagnostics, `/subagents-watchdog` status/model commands, and agent-facing watchdog configuration actions. Thanks to can1357/oh-my-pi for the advisor/watchdog concept, and to apmantza/pi-lens, gjczone/pi-shazam, and can1357/oh-my-pi for LSP diagnostics patterns.
 
 ### Changed
+- Split the reduced parameter surface out of `toolDescriptionMode` into its own `toolSchemaMode` setting. `toolDescriptionMode: "custom"` now only replaces the visible description text; `toolSchemaMode: "harness"` alone registers the reduced schema (SINGLE execution plus `list`/`status`/`stop`/`interrupt`), validates `action` as a closed enum and rejects additional properties. `subagent({ action: "doctor" })` reports both modes.
 - Updated the bundled `pi-subagents` skill so Fable mode is the default orchestration posture for complex work, and refreshed recent command/config guidance.
 - Documented `contact_supervisor` structured interview requests in the default child bridge instructions.
 
 ### Fixed
+- Dropped the watchdog review's provider `env` forwarding. Neither the resolved request auth nor the stream options carry `env` any more, so the plumbing was dead and its test asserted behaviour the runtime no longer had.
 - Hide lower-priority agent definitions from `subagent({ action: "list" })` when a higher-priority project or user agent shadows them. Thanks to Kylegl (@kylegl) for #415.
 - Resolve the real Pi CLI on Windows when pi-subagents runs inside an embedded SDK host instead of relaunching the host application's entry point. Thanks to Marc Kassubeck (@CompN3rd) for #413.
 - Avoid rendering active subagent activity as `now ago`. Thanks to Viktor Chernodub (@chernodub) for #414.

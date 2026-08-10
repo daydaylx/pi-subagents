@@ -276,10 +276,16 @@ describe("acceptance gates", () => {
 	it("verified mode records runtime command success and failure separately from child command claims", async () => {
 		const cwd = tempRepo();
 		try {
+			// Verify commands run as program + args without a shell, so the exit
+			// codes come from real script files instead of an inline `node -e`
+			// snippet, which the metacharacter filter blocks by design.
+			fs.writeFileSync(path.join(cwd, "exit-0.mjs"), "process.exit(0);\n", "utf-8");
+			fs.writeFileSync(path.join(cwd, "exit-7.mjs"), "process.exit(7);\n", "utf-8");
+
 			const passing = resolveEffectiveAcceptance({
 				agentName: "worker",
 				task: "Implement a fix",
-				explicit: { level: "verified", verify: [{ id: "pass", command: "node -e \"process.exit(0)\"", timeoutMs: 10_000 }] },
+				explicit: { level: "verified", verify: [{ id: "pass", command: "node exit-0.mjs", timeoutMs: 10_000 }] },
 			});
 			const passLedger = await evaluateAcceptance({ acceptance: passing, output: report(), cwd });
 			assert.equal(passLedger.status, "verified");
@@ -288,12 +294,31 @@ describe("acceptance gates", () => {
 			const failing = resolveEffectiveAcceptance({
 				agentName: "worker",
 				task: "Implement a fix",
-				explicit: { level: "verified", verify: [{ id: "fail", command: "node -e \"process.exit(7)\"", timeoutMs: 10_000 }] },
+				explicit: { level: "verified", verify: [{ id: "fail", command: "node exit-7.mjs", timeoutMs: 10_000 }] },
 			});
 			const failLedger = await evaluateAcceptance({ acceptance: failing, output: report(), cwd });
 			assert.equal(failLedger.status, "rejected");
 			assert.equal(failLedger.childReport?.commandsRun?.[0]?.result, "passed");
 			assert.equal(failLedger.verifyRuns[0]?.status, "failed");
+			assert.equal(failLedger.verifyRuns[0]?.exitCode, 7);
+		} finally {
+			fs.rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	it("blocks a verify command that would need a shell instead of running it", async () => {
+		const cwd = tempRepo();
+		try {
+			const acceptance = resolveEffectiveAcceptance({
+				agentName: "worker",
+				task: "Implement a fix",
+				explicit: { level: "verified", verify: [{ id: "shell", command: "node -e \"process.exit(0)\"", timeoutMs: 10_000 }] },
+			});
+			const ledger = await evaluateAcceptance({ acceptance, output: report(), cwd });
+			assert.equal(ledger.status, "rejected");
+			assert.equal(ledger.verifyRuns[0]?.status, "failed");
+			assert.equal(ledger.verifyRuns[0]?.exitCode, null);
+			assert.match(ledger.verifyRuns[0]?.stderr ?? "", /shell metacharacters/);
 		} finally {
 			fs.rmSync(cwd, { recursive: true, force: true });
 		}

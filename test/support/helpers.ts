@@ -17,6 +17,23 @@ export function createTempDir(prefix = "pi-subagent-test-"): string {
 	return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
 
+/**
+ * Acceptance verify commands run as program + args with `shell: false`, and the
+ * runner blocks anything carrying shell metacharacters. An inline `node -e "…"`
+ * snippet is therefore never executed, so tests that need a real exit code or a
+ * real delay write a script file and run it by path.
+ */
+export function writeVerifyScript(dir: string, name: string, source: string): string {
+	const scriptPath = path.join(dir, name);
+	fs.writeFileSync(scriptPath, source.endsWith("\n") ? source : `${source}\n`, "utf-8");
+	return `${process.execPath} ${scriptPath}`;
+}
+
+/** A verify command that stays busy long enough to be cancelled by a timeout. */
+export function slowVerifyCommand(dir: string, delayMs = 5_000): string {
+	return writeVerifyScript(dir, "slow-verify.mjs", `setTimeout(() => process.exit(0), ${delayMs});`);
+}
+
 export function removeTempDir(dir: string): void {
 	try {
 		fs.rmSync(dir, { recursive: true, force: true });

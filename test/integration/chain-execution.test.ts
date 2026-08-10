@@ -22,6 +22,7 @@ import {
 	makeMinimalCtx,
 	tryImport,
 	events,
+	writeVerifyScript,
 } from "../support/helpers.ts";
 import { INTERCOM_DETACH_REQUEST_EVENT } from "../../src/shared/types.ts";
 
@@ -415,7 +416,7 @@ describe("chain execution — sequential", { skip: !available ? "pi packages not
 
 		const result = await executeChain(
 			makeChainParams(
-				[{ agent: "worker", task: "Implement fix", acceptance: { level: "verified", verify: [{ id: "runtime-pass", command: "node -e \"process.exit(0)\"" }] } }],
+				[{ agent: "worker", task: "Implement fix", acceptance: { level: "verified", verify: [{ id: "runtime-pass", command: writeVerifyScript(tempDir, "verify-pass.mjs", "process.exit(0);") }] } }],
 				agents,
 			),
 		);
@@ -426,7 +427,7 @@ describe("chain execution — sequential", { skip: !available ? "pi packages not
 		mockPi.onCall({ output: acceptanceReport });
 		const failed = await executeChain(
 			makeChainParams(
-				[{ agent: "worker", task: "Implement fix", acceptance: { level: "verified", verify: [{ id: "runtime-fail", command: "node -e \"process.exit(5)\"" }] } }],
+				[{ agent: "worker", task: "Implement fix", acceptance: { level: "verified", verify: [{ id: "runtime-fail", command: writeVerifyScript(tempDir, "verify-fail.mjs", "process.exit(5);") }] } }],
 				agents,
 			),
 		);

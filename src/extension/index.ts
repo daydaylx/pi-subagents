@@ -24,7 +24,7 @@ import { cleanupAllArtifactDirs, cleanupOldArtifacts, getArtifactsDir } from "..
 import { resolveCurrentSessionId } from "../shared/session-identity.ts";
 import { cleanupOldChainDirs } from "../shared/settings.ts";
 import { clearLegacyResultAnimationTimer, renderWidget, renderSubagentResult } from "../tui/render.ts";
-import { HarnessSubagentParams, SubagentParams, WaitParams } from "./schemas.ts";
+import { subagentToolParameters, WaitParams } from "./schemas.ts";
 import { createSubagentExecutor, type SubagentParamsLike } from "../runs/foreground/subagent-executor.ts";
 import { createAsyncJobTracker } from "../runs/background/async-job-tracker.ts";
 import { createResultWatcher } from "../runs/background/result-watcher.ts";
@@ -456,6 +456,16 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		execute: (id, params, signal, onUpdate, ctx) => executor.execute(id, params, signal, onUpdate, ctx),
 	});
 
+	type RenderableSubagentArgs = {
+		action?: string;
+		agent?: string;
+		chainName?: string;
+		async?: boolean;
+		clarify?: boolean;
+		tasks?: Array<{ count?: unknown }>;
+		chain?: unknown[];
+	};
+
 	function effectiveParallelTaskCount(tasks: Array<{ count?: unknown }> | undefined): number {
 		if (!tasks || tasks.length === 0) return 0;
 		return tasks.reduce((total, task) => {
@@ -464,7 +474,10 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		}, 0);
 	}
 
-	const toolParams = config.toolDescriptionMode === "custom" ? HarnessSubagentParams : SubagentParams;
+	// The visible description and the accepted parameters are independent
+	// settings: `toolDescriptionMode` only chooses the text the model reads,
+	// `toolSchemaMode` alone decides which parameters validate.
+	const toolParams = subagentToolParameters(config);
 
 	const tool: ToolDefinition<typeof toolParams, Details> = {
 		name: "subagent",
@@ -476,7 +489,11 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		return executeSubagentCollapsed(id, params as unknown as SubagentParamsLike, signal ?? new AbortController().signal, onUpdate, ctx);
 		},
 
-		renderCall(args, theme) {
+		renderCall(rawArgs, theme) {
+			// One renderer serves both parameter surfaces. The reduced surface has
+			// no chain or parallel fields at all, so they are read as optional here
+			// rather than assumed to exist on whichever schema is active.
+			const args = rawArgs as RenderableSubagentArgs;
 			if (args.action) {
 				const target = args.agent || args.chainName || "";
 				return new Text(
@@ -485,7 +502,7 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 				);
 			}
 			const isParallel = (args.tasks?.length ?? 0) > 0;
-			const parallelCount = effectiveParallelTaskCount(args.tasks as Array<{ count?: unknown }> | undefined);
+			const parallelCount = effectiveParallelTaskCount(args.tasks);
 			const asyncLabel = args.async === true && args.clarify !== true ? theme.fg("warning", " [async]") : "";
 			if (args.chain?.length)
 				return new Text(

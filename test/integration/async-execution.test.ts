@@ -13,7 +13,7 @@ import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { createEventBus, createMockPi, createTempDir, events, makeAgent, makeMinimalCtx, removeTempDir, tryImport } from "../support/helpers.ts";
+import { createEventBus, createMockPi, createTempDir, events, makeAgent, makeMinimalCtx, removeTempDir, slowVerifyCommand, tryImport } from "../support/helpers.ts";
 import type { MockPi } from "../support/helpers.ts";
 import { deliverInterruptRequest } from "../../src/runs/background/control-channel.ts";
 import { CHILD_WATCHDOG_STATUS_EVENT } from "../../src/watchdog/child-status.ts";
@@ -597,7 +597,7 @@ describe("async execution utilities", { skip: !available ? "pi packages not avai
 			timeoutMs: 1_000,
 			acceptance: {
 				level: "verified",
-				verify: [{ id: "slow", command: `${process.execPath} -e "setTimeout(()=>process.exit(0), 5000)"`, timeoutMs: 10_000 }],
+				verify: [{ id: "slow", command: slowVerifyCommand(tempDir), timeoutMs: 10_000 }],
 			},
 		});
 
@@ -1179,7 +1179,7 @@ describe("async execution utilities", { skip: !available ? "pi packages not avai
 					collect: { as: "reviews" },
 					acceptance: {
 						level: "verified",
-						verify: [{ id: "slow", command: `${process.execPath} -e "setTimeout(()=>process.exit(0), 5000)"`, timeoutMs: 10_000 }],
+						verify: [{ id: "slow", command: slowVerifyCommand(tempDir), timeoutMs: 10_000 }],
 					},
 				},
 			],

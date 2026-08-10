@@ -1282,6 +1282,20 @@ Controls the parent-facing `subagent` tool description registered at startup. `f
 
 `custom` reads `subagent-tool-description.md` from the project config directory, then from `~/.pi/agent/subagent-tool-description.md`. Missing, empty, unreadable, or oversized custom files fall back to the full description. Custom templates may use `{{fullDescription}}`, `{{compactDescription}}`, `{{safetyGuidance}}`, `{{agentDir}}`, and `{{projectConfigDir}}`; the safety guidance is always present so custom prose cannot remove the runtime guardrails. Restart Pi after changing the mode or custom file.
 
+This setting controls the visible description text only. Which parameters the tool accepts is a separate setting, `toolSchemaMode`.
+
+### `toolSchemaMode`
+
+```json
+{ "toolSchemaMode": "harness" }
+```
+
+Controls the parameter schema registered for the `subagent` tool. `full` is the default and registers the complete surface.
+
+`harness` registers a reduced surface for hosts that only run one subagent at a time: SINGLE execution plus the management actions `list`, `status`, `stop` and `interrupt`. `action` is a closed enum and the schema rejects additional properties, so chain, parallel, agent CRUD, scheduling, worktrees, sharing, watchdog, `resume`, `steer` and `append-step` fail argument validation before the executor sees them. The runtime keeps those code paths for hosts on the full surface; the reduction is a registration choice, not a removal.
+
+`subagent({ action: "doctor" })` reports both modes and the accepted actions under `Tool surface`. Restart Pi after changing the mode.
+
 ### `asyncByDefault`
 
 ```json
