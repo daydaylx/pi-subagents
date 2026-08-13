@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { beforeEach, describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { scheduledRunStorePath } from "../../src/runs/background/scheduled-runs.ts";
 import { SUBAGENT_FANOUT_CHILD_ENV } from "../../src/runs/shared/pi-args.ts";
@@ -177,6 +177,48 @@ async function withTempProject<T>(prefix: string, fn: (root: string) => Promise<
 	} finally {
 		fs.rmSync(root, { recursive: true, force: true });
 	}
+}
+
+/**
+ * Begin/end counterpart to withIsolatedHome + withTempProject, for tests that
+ * are not written as a callback. Without it, agent discovery falls through to
+ * whatever ~/.pi/agent the developer happens to have, so the same test passes
+ * on one machine and fails on the next.
+ */
+function beginIsolatedProject(prefix: string): { root: string; restore(): void } {
+	const home = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}home-`));
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}root-`));
+	fs.mkdirSync(path.join(root, ".pi", "agents"), { recursive: true });
+	fs.mkdirSync(path.join(root, ".pi", "chains"), { recursive: true });
+	const previous = {
+		agentDir: process.env.PI_CODING_AGENT_DIR,
+		home: process.env.HOME,
+		userProfile: process.env.USERPROFILE,
+	};
+	process.env.PI_CODING_AGENT_DIR = path.join(home, ".pi", "agent");
+	process.env.HOME = home;
+	process.env.USERPROFILE = home;
+	return {
+		root,
+		restore() {
+			if (previous.agentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+			else process.env.PI_CODING_AGENT_DIR = previous.agentDir;
+			if (previous.home === undefined) delete process.env.HOME;
+			else process.env.HOME = previous.home;
+			if (previous.userProfile === undefined) delete process.env.USERPROFILE;
+			else process.env.USERPROFILE = previous.userProfile;
+			fs.rmSync(home, { recursive: true, force: true });
+			fs.rmSync(root, { recursive: true, force: true });
+		},
+	};
+}
+
+function writeProjectAgent(root: string, name: string, description: string): void {
+	fs.writeFileSync(
+		path.join(root, ".pi", "agents", `${name}.md`),
+		`---\nname: ${name}\ndescription: ${description}\n---\n\nInspect\n`,
+		"utf-8",
+	);
 }
 
 function writeProjectChain(root: string, fileName: string, content: string): void {
@@ -462,8 +504,21 @@ describe("subagents watchdog slash command", { skip: !available ? "watchdog comm
 });
 
 describe("slash command custom message delivery", { skip: !available ? "slash-commands.ts not importable" : undefined }, () => {
+	// These cases resolve a real agent through discoverAgents(). Without an
+	// isolated home they fall back to whatever ~/.pi/agent the developer has,
+	// so they passed only on a machine that happened to ship a "scout" agent.
+	let isolation: { root: string; restore(): void };
+	let projectRoot: string;
+
 	beforeEach(() => {
 		clearSlashSnapshots?.();
+		isolation = beginIsolatedProject("pi-slash-delivery-");
+		projectRoot = isolation.root;
+		writeProjectAgent(projectRoot, "scout", "Fast recon");
+	});
+
+	afterEach(() => {
+		isolation.restore();
 	});
 
 	it("/run accepts an agent without a task", async () => {
@@ -507,7 +562,7 @@ describe("slash command custom message delivery", { skip: !available ? "slash-co
 		};
 
 		const ctx = createCommandContext({ sessionManager });
-		registerSlashCommands!(pi, createState(process.cwd()));
+		registerSlashCommands!(pi, createState(projectRoot));
 		await commands.get("run")!.handler("scout", ctx);
 
 		assert.deepEqual(requestedParams, { agent: "scout", task: "", clarify: false, agentScope: "both" });
@@ -551,7 +606,7 @@ describe("slash command custom message delivery", { skip: !available ? "slash-co
 			},
 		};
 
-		registerSlashCommands!(pi, createState(process.cwd()));
+		registerSlashCommands!(pi, createState(projectRoot));
 		await commands.get("run")!.handler("scout inspect this", createCommandContext({
 			hasUI: true,
 			setStatus: (_key, text) => {
@@ -600,7 +655,7 @@ describe("slash command custom message delivery", { skip: !available ? "slash-co
 			},
 		};
 
-		registerSlashCommands!(pi, createState(process.cwd()));
+		registerSlashCommands!(pi, createState(projectRoot));
 		await commands.get("run")!.handler("scout inspect this", createCommandContext({
 			hasUI: true,
 			setToolsExpanded: (expanded) => log.push(`expanded:${String(expanded)}`),
@@ -640,7 +695,7 @@ describe("slash command custom message delivery", { skip: !available ? "slash-co
 			},
 		};
 
-		registerSlashCommands!(pi, createState(process.cwd()));
+		registerSlashCommands!(pi, createState(projectRoot));
 		await commands.get("run")!.handler("scout inspect this", createCommandContext({
 			hasUI: true,
 			setStatus: (_key, text) => {
@@ -690,7 +745,7 @@ describe("slash command custom message delivery", { skip: !available ? "slash-co
 			sendMessage(_message: unknown) {},
 		};
 
-		registerSlashCommands!(pi, createState(process.cwd()));
+		registerSlashCommands!(pi, createState(projectRoot));
 		await commands.get("parallel")!.handler("scout[output=x.md,outputMode=file-only,reads=a.md+b.md,progress] -- Review", createCommandContext());
 
 		assert.deepEqual(requestedParams, {
@@ -730,7 +785,7 @@ describe("slash command custom message delivery", { skip: !available ? "slash-co
 			},
 		};
 
-		registerSlashCommands!(pi, createState(process.cwd()));
+		registerSlashCommands!(pi, createState(projectRoot));
 		const args = Array.from({ length: 9 }, (_, index) => `scout \"task ${index + 1}\"`).join(" -> ");
 		await commands.get("parallel")!.handler(args, createCommandContext());
 
