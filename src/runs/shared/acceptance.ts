@@ -710,6 +710,62 @@ export function aggregateAcceptanceReport(input: {
 	};
 }
 
+/**
+ * Critical environment variables that must not be overridden via
+ * acceptance.verify[].env. Overriding these could alter process or
+ * loader behavior and bypass security assumptions.
+ */
+const BLOCKED_ENV_VARS = new Set([
+	"PATH",
+	"NODE_OPTIONS",
+	"LD_PRELOAD",
+	"LD_LIBRARY_PATH",
+	"NODE_PATH",
+	"PYTHONPATH",
+	"RUBYOPT",
+	"PERL5LIB",
+	"CLASSPATH",
+	"GEM_PATH",
+	"GEM_HOME",
+	"PIP_REQUIRE_VIRTUALENV",
+	"NPM_CONFIG_PREFIX",
+	"NPM_CONFIG_CACHE",
+	"BUN_INSTALL",
+	"DENO_DIR",
+	"CARGO_HOME",
+	"RUSTUP_HOME",
+	"GOPATH",
+	"GOROOT",
+	"JAVA_HOME",
+]);
+
+/**
+ * DYLD_* environment variables (macOS dynamic linker). Blocked wholesale
+ * because any DYLD_ override can alter process loading.
+ */
+function isBlockedEnvVar(name: string): boolean {
+	if (BLOCKED_ENV_VARS.has(name)) return true;
+	if (/^DYLD_/i.test(name)) return true;
+	// Acceptance must not replace provider secrets or other credentials from
+	// the parent environment. Harmless task-specific variables remain allowed.
+	if (/(?:API_KEY|TOKEN|SECRET|PASSWORD|CREDENTIALS?|PRIVATE_KEY)/i.test(name)) return true;
+	return false;
+}
+
+/**
+ * Build a safe environment for acceptance verification by merging
+ * process.env with command.env, blocking critical overrides.
+ */
+function buildVerifyEnv(commandEnv: Record<string, string> | undefined): NodeJS.ProcessEnv {
+	const merged: NodeJS.ProcessEnv = { ...process.env };
+	if (!commandEnv) return merged;
+	for (const key of Object.keys(commandEnv)) {
+		if (isBlockedEnvVar(key)) continue;
+		merged[key] = commandEnv[key];
+	}
+	return merged;
+}
+
 const CRITICAL_VERIFY_PATTERNS: Array<[RegExp, string]> = [
 	[
 		/\brm\b[^;&|]*(?:^|\s)["']?\/(?:[/.])*["']?(?=\s|$)/i,
@@ -861,7 +917,7 @@ function runVerifyCommand(command: AcceptanceVerifyCommand, defaultCwd: string, 
 		let hardKill: NodeJS.Timeout | undefined;
 		const child = spawn(parsed.program, parsed.args, {
 			cwd,
-			env: { ...process.env, ...(command.env ?? {}) },
+			env: buildVerifyEnv(command.env),
 			shell: false,
 			stdio: ["ignore", "pipe", "pipe"],
 			windowsHide: true,

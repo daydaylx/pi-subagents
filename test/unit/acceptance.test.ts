@@ -443,4 +443,40 @@ describe("acceptance gates", () => {
 		assert.match(validateAcceptanceInput({ stopRules: [123] }).join("\n"), /acceptance\.stopRules\[0\] must be a string/);
 		assert.match(validateAcceptanceInput({ surprise: true }).join("\n"), /acceptance\.surprise is not supported/);
 	});
+
+	it("filters critical acceptance environment overrides while preserving harmless variables", async () => {
+		const cwd = tempRepo();
+		try {
+			const acceptance = resolveEffectiveAcceptance({
+				agentName: "worker",
+				task: "Implement a fix",
+				explicit: {
+					level: "verified",
+					verify: [
+						{
+							id: "harmless-variable",
+							command: "printenv VERIFY_MARKER",
+							env: { VERIFY_MARKER: "acceptance-safe-value" },
+						},
+						{
+							id: "blocked-overrides",
+							command: "node --version",
+							env: {
+								PATH: "acceptance-unsafe-path",
+								NODE_OPTIONS: "--require acceptance-unsafe-loader",
+								OPENAI_API_KEY: "acceptance-unsafe-secret",
+							},
+						},
+					],
+				},
+			});
+			const ledger = await evaluateAcceptance({ acceptance, output: report(), cwd });
+
+			assert.equal(ledger.status, "verified");
+			assert.equal(ledger.verifyRuns[0]?.stdout, "acceptance-safe-value");
+			assert.equal(ledger.verifyRuns[1]?.status, "passed");
+		} finally {
+			fs.rmSync(cwd, { recursive: true, force: true });
+		}
+	});
 });
