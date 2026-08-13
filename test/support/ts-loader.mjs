@@ -80,8 +80,23 @@ function asDataModule(source) {
   return `data:text/javascript,${encodeURIComponent(source)}`;
 }
 
+// src/tui/render.ts was split into several sibling files (render-format.ts,
+// render-widget-core.ts, render-widget-layout.ts, render-result.ts); each one
+// needs the same deterministic pi-coding-agent/pi-tui shim the original
+// monolithic render.ts relied on for stable test output.
+const RENDER_SHIM_FILENAMES = new Set([
+  "render.ts",
+  "render-format.ts",
+  "render-widget-core.ts",
+  "render-widget-layout.ts",
+  "render-result.ts",
+]);
+
 export function resolve(specifier, context, nextResolve) {
-  if (context.parentURL?.endsWith("/render.ts")) {
+  if (
+    context.parentURL &&
+    RENDER_SHIM_FILENAMES.has(path.basename(fileURLToPath(context.parentURL)))
+  ) {
     if (specifier === "@earendil-works/pi-coding-agent") {
       return { url: asDataModule(renderPiCodingAgentShim), shortCircuit: true };
     }
