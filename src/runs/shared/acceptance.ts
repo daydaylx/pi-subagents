@@ -77,14 +77,19 @@ function inferLevel(input: {
 	const agent = input.agentName.toLowerCase();
 	const task = input.task?.toLowerCase() ?? "";
 	const reasons: string[] = [];
-	const readOnlyAgent = /\b(?:reviewer|scout|context-builder|researcher|analyst)\b/.test(agent);
+	const readOnlyAgent = /\b(?:reviewer|scout|context-builder|researcher|analyst|verifier)\b/.test(agent);
 	const readOnlyTask = /\b(?:read[- ]only|review[- ]only|do not edit|don't edit|no edits|without edits|inspect|summari[sz]e)\b/.test(task);
 	const writeTask = /\b(?:fix|implement|update|write|edit|modify|migrate|release|security|delete|remove|refactor|commit)\b/.test(task)
 		|| /\bworker\b/.test(agent);
+	// A read-only-style agent (e.g. an independent verifier) cannot satisfy
+	// `reviewed`'s recursive requirement for a second reviewer role that may
+	// not even exist for this caller, so risky task wording alone must not
+	// escalate it there. Execution-context risk (async/dynamic fanout) stays
+	// enforced regardless of agent role.
 	const risky = Boolean(input.async && writeTask)
 		|| Boolean(input.dynamic)
 		|| Boolean(input.dynamicGroup)
-		|| /\b(?:release|migration|migrate|security|data[- ]loss|destructive|post-review|fix pass)\b/.test(task);
+		|| (!readOnlyAgent && /\b(?:release|migration|migrate|security|data[- ]loss|destructive|post-review|fix pass)\b/.test(task));
 
 	if (risky) {
 		reasons.push(input.async ? "async write-capable or risky run" : "risky write-capable run");

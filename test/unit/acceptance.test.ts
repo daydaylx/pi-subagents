@@ -51,6 +51,16 @@ describe("acceptance gates", () => {
 		assert.equal(resolveEffectiveAcceptance({ agentName: "worker", task: "Fix each item", mode: "chain", dynamic: true }).level, "reviewed");
 	});
 
+	it("does not force a read-only-style agent into reviewed on risky task wording alone", () => {
+		const riskyWording =
+			"Original User Request:\nIndependently verify the security fix and migration script.";
+		assert.equal(resolveEffectiveAcceptance({ agentName: "verifier", task: riskyWording, mode: "single" }).level, "checked");
+		assert.notEqual(resolveEffectiveAcceptance({ agentName: "verifier", task: riskyWording, mode: "single" }).level, "reviewed");
+		// Execution-context risk (async + write-capable) stays enforced even for
+		// a read-only-style agent name; only the task-wording clause is gated.
+		assert.equal(resolveEffectiveAcceptance({ agentName: "verifier", task: "Implement the fix", mode: "single", async: true }).level, "reviewed");
+	});
+
 	it("explicit acceptance can strengthen inferred policy", () => {
 		const resolved = resolveEffectiveAcceptance({
 			agentName: "reviewer",
