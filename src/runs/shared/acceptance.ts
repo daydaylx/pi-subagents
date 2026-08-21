@@ -85,7 +85,10 @@ function inferLevel(input: {
 	// `reviewed`'s recursive requirement for a second reviewer role that may
 	// not even exist for this caller, so risky task wording alone must not
 	// escalate it there. Execution-context risk (async/dynamic fanout) stays
-	// enforced regardless of agent role.
+	// enforced regardless of agent role. The same reasoning applies to
+	// `checked`: a read-only-style agent cannot produce write-task evidence
+	// like `tests-added` either, so writeTask wording must not escalate it
+	// past `attested` (see the `readOnlyAgent` check below).
 	const risky = Boolean(input.async && writeTask)
 		|| Boolean(input.dynamic)
 		|| Boolean(input.dynamicGroup)
@@ -102,7 +105,7 @@ function inferLevel(input: {
 			review: { agent: "reviewer", required: true },
 		};
 	}
-	if (writeTask && !readOnlyTask) {
+	if (writeTask && !readOnlyTask && !readOnlyAgent) {
 		reasons.push("write-capable worker/task");
 		return {
 			level: "checked",

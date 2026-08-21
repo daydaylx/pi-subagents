@@ -51,13 +51,19 @@ describe("acceptance gates", () => {
 		assert.equal(resolveEffectiveAcceptance({ agentName: "worker", task: "Fix each item", mode: "chain", dynamic: true }).level, "reviewed");
 	});
 
-	it("does not force a read-only-style agent into reviewed on risky task wording alone", () => {
+	it("does not force a read-only-style agent into reviewed or checked on task wording alone", () => {
 		const riskyWording =
 			"Original User Request:\nIndependently verify the security fix and migration script.";
-		assert.equal(resolveEffectiveAcceptance({ agentName: "verifier", task: riskyWording, mode: "single" }).level, "checked");
+		assert.equal(resolveEffectiveAcceptance({ agentName: "verifier", task: riskyWording, mode: "single" }).level, "attested");
 		assert.notEqual(resolveEffectiveAcceptance({ agentName: "verifier", task: riskyWording, mode: "single" }).level, "reviewed");
+		// Ordinary write-task wording (fix/implement/update/...) alone must not
+		// escalate a read-only-style agent to "checked" either: it can no more
+		// produce write-task evidence like tests-added than it can satisfy a
+		// second reviewer role.
+		assert.equal(resolveEffectiveAcceptance({ agentName: "verifier", task: "Fix the security issue", mode: "single" }).level, "attested");
+		assert.notEqual(resolveEffectiveAcceptance({ agentName: "verifier", task: "Fix the security issue", mode: "single" }).level, "checked");
 		// Execution-context risk (async + write-capable) stays enforced even for
-		// a read-only-style agent name; only the task-wording clause is gated.
+		// a read-only-style agent name; only the task-wording clauses are gated.
 		assert.equal(resolveEffectiveAcceptance({ agentName: "verifier", task: "Implement the fix", mode: "single", async: true }).level, "reviewed");
 	});
 
