@@ -4,19 +4,13 @@ import type {
   Theme,
 } from "@earendil-works/pi-coding-agent";
 import {
-  DynamicBorder,
-  getSettingsListTheme,
-} from "@earendil-works/pi-coding-agent";
-import {
-  Container,
   fuzzyFilter,
   getKeybindings,
   Input,
-  SettingsList,
-  Spacer,
-  Text,
+  truncateToWidth,
+  visibleWidth,
+  wrapTextWithAnsi,
   type Component,
-  type SettingItem,
   type TUI,
 } from "@earendil-works/pi-tui";
 import {
@@ -46,6 +40,9 @@ const AGENT_SOURCE_PRECEDENCE: Record<AgentSource, number> = {
   user: 2,
   project: 3,
 };
+
+const ELLIPSIS = "…";
+const COMPACT_WIDTH = 52;
 
 /**
  * Dedupe across all four discovery sources by name (project > user > package >
@@ -145,42 +142,134 @@ function sendRoleModelText(pi: ExtensionAPI, text: string): void {
   });
 }
 
-/**
- * Mirrors the row style of the real /model screen (accent "→ " cursor,
- * muted "[provider]" badge, success "✓" on the currently active model) —
- * "current" here is the role's prior override, not a session default.
- */
-function renderModelLine(
+export function roleSourceLabel(source: AgentSource): string {
+  switch (source) {
+    case "builtin":
+      return "Integriert";
+    case "package":
+      return "Paket";
+    case "user":
+      return "Benutzer";
+    case "project":
+      return "Projekt";
+  }
+}
+
+export interface PickerWindow {
+  start: number;
+  end: number;
+}
+
+/** Keeps a focused row near the center while retaining a stable list window. */
+export function pickerWindow(
+  count: number,
+  selectedIndex: number,
+  maxVisible: number,
+): PickerWindow {
+  if (count <= 0 || maxVisible <= 0) return { start: 0, end: 0 };
+  const visible = Math.min(count, maxVisible);
+  const selected = Math.max(0, Math.min(count - 1, selectedIndex));
+  const start = Math.max(
+    0,
+    Math.min(selected - Math.floor(visible / 2), count - visible),
+  );
+  return { start, end: start + visible };
+}
+
+export function movePickerIndex(
+  current: number,
+  delta: number,
+  count: number,
+): number {
+  if (count <= 0) return -1;
+  const start = Math.max(0, Math.min(count - 1, current));
+  return (start + delta + count) % count;
+}
+
+function pad(value: string, width: number): string {
+  const clipped = truncateToWidth(value, Math.max(1, width), ELLIPSIS);
+  return `${clipped}${" ".repeat(
+    Math.max(0, Math.max(1, width) - visibleWidth(clipped)),
+  )}`;
+}
+
+function renderPanel(theme: Theme, width: number, lines: string[]): string[] {
+  if (width < 4) return [truncateToWidth("Menü", Math.max(1, width), ELLIPSIS)];
+  const inner = Math.max(1, width - 2);
+  const border = (value: string) => theme.fg("border", value);
+  const frame = (value: string) => `${border("│")}${pad(value, inner)}${border("│")}`;
+  return [
+    `${border("╭")}${border("─".repeat(inner))}${border("╮")}`,
+    ...lines.map(frame),
+    `${border("╰")}${border("─".repeat(inner))}${border("╯")}`,
+  ];
+}
+
+function divider(theme: Theme, width: number): string {
+  return theme.fg("borderMuted", "─".repeat(Math.max(1, width)));
+}
+
+function renderInput(input: Input, width: number): string[] {
+  return input.render(Math.max(1, width)).map((line) =>
+    truncateToWidth(line, Math.max(1, width), ELLIPSIS),
+  );
+}
+
+function detailLines(theme: Theme, value: string, width: number): string[] {
+  return wrapTextWithAnsi(
+    theme.fg("muted", value),
+    Math.max(1, width),
+  ).slice(0, 2);
+}
+
+export function renderRoleLine(
+  theme: Theme,
+  role: PickableRole,
+  isSelected: boolean,
+): string {
+  const cursor = isSelected ? theme.fg("accent", "▌ ") : "  ";
+  const name = isSelected
+    ? theme.fg("accent", theme.bold(role.name))
+    : theme.fg("text", role.name);
+  const status = role.currentModel
+    ? theme.fg("success", "● MODELL")
+    : theme.fg("muted", "○ STANDARD");
+  return `${cursor}${name}  ${status}`;
+}
+
+/** A selected model is marked structurally and with a success mark when current. */
+export function renderModelLine(
   theme: Theme,
   item: RoleModelItem,
   isSelected: boolean,
   isCurrent: boolean,
 ): string {
-  const providerBadge = theme.fg("muted", `[${item.provider}]`);
-  const checkmark = isCurrent ? theme.fg("success", " ✓") : "";
-  if (isSelected) {
-    const prefix = theme.fg("accent", "→ ");
-    return `${prefix}${theme.fg("accent", item.id)} ${providerBadge}${checkmark}`;
-  }
-  return `  ${item.id} ${providerBadge}${checkmark}`;
+  const cursor = isSelected ? theme.fg("accent", "▌ ") : "  ";
+  const label = isSelected
+    ? theme.fg("accent", theme.bold(item.id))
+    : theme.fg("text", item.id);
+  const provider = theme.fg("muted", `[${item.provider}]`);
+  const current = isCurrent ? theme.fg("success", " ● AKTUELL") : "";
+  return `${cursor}${label} ${provider}${current}`;
 }
 
-/**
- * DynamicBorder's global theme singleton can be undefined for jiti-loaded
- * extensions (separate module cache) — always pass an explicit color
- * function, per dynamic-border.d.ts's own warning.
- */
-function borderFor(theme: Theme): DynamicBorder {
-  return new DynamicBorder((s) => theme.fg("border", s));
+function matchesRole(role: PickableRole, query: string): boolean {
+  return fuzzyFilter(
+    [role],
+    query,
+    (item) =>
+      `${item.name} ${item.description} ${item.source} ${item.currentModel ?? ""}`,
+  ).length > 0;
 }
 
-class RoleModelSubmenu extends Container implements Component {
+export class RoleModelSubmenu implements Component {
   private readonly theme: Theme;
   private readonly items: RoleModelItem[];
   private readonly currentValue: string;
   private readonly done: (value?: string) => void;
-  private readonly searchInput: Input;
-  private readonly listContainer: Container;
+  private readonly roleName: string;
+  private readonly roleDescription: string;
+  private readonly searchInput = new Input();
   private filteredItems: RoleModelItem[];
   private selectedIndex = 0;
 
@@ -192,137 +281,108 @@ class RoleModelSubmenu extends Container implements Component {
     currentValue: string,
     done: (value?: string) => void,
   ) {
-    super();
     this.theme = theme;
+    this.roleName = roleName;
+    this.roleDescription = roleDescription;
     this.items = items;
     this.filteredItems = items;
     this.currentValue = currentValue;
     this.done = done;
-
-    this.addChild(borderFor(theme));
-    this.addChild(new Spacer(1));
-    this.addChild(
-      new Text(
-        theme.fg("accent", theme.bold(`Modell für „${roleName}“`)),
-        0,
-        0,
-      ),
-    );
-    if (roleDescription.trim()) {
-      this.addChild(new Text(theme.fg("muted", roleDescription), 0, 0));
-    }
-    this.addChild(new Spacer(1));
-
-    this.searchInput = new Input();
-    this.addChild(this.searchInput);
-    this.addChild(new Spacer(1));
-
-    this.listContainer = new Container();
-    this.addChild(this.listContainer);
-    this.addChild(new Spacer(1));
-
-    this.addChild(
-      new Text(
-        theme.fg("dim", "Enter") +
-          theme.fg("muted", " wählt · ") +
-          theme.fg("dim", "Esc") +
-          theme.fg("muted", " bricht ab · Tippen filtert"),
-        0,
-        0,
-      ),
-    );
-    this.addChild(borderFor(theme));
-
-    const idx = items.findIndex((item) => item.value === currentValue);
-    this.selectedIndex = idx !== -1 ? idx : 0;
-    this.updateList();
+    const current = items.findIndex((item) => item.value === currentValue);
+    this.selectedIndex = current >= 0 ? current : 0;
   }
 
-  private filterItems(query: string): void {
+  invalidate(): void {}
+
+  private filterItems(): void {
+    const query = this.searchInput.getValue();
     this.filteredItems = query
       ? fuzzyFilter(
           this.items,
           query,
-          (item) => `${item.id} ${item.provider} ${item.provider}/${item.id}`,
+          (item) => `${item.id} ${item.provider} ${item.value}`,
         )
       : this.items;
     this.selectedIndex = Math.min(
       this.selectedIndex,
       Math.max(0, this.filteredItems.length - 1),
     );
-    this.updateList();
   }
 
-  private updateList(): void {
-    this.listContainer.clear();
-    const maxVisible = 10;
-    const startIndex = Math.max(
-      0,
-      Math.min(
-        this.selectedIndex - Math.floor(maxVisible / 2),
-        this.filteredItems.length - maxVisible,
-      ),
-    );
-    const endIndex = Math.min(
-      startIndex + maxVisible,
+  render(width: number): string[] {
+    const inner = Math.max(1, width - 2);
+    const compact = width < COMPACT_WIDTH;
+    const window = pickerWindow(
       this.filteredItems.length,
+      this.selectedIndex,
+      compact ? 5 : 8,
     );
-
-    for (let i = startIndex; i < endIndex; i++) {
-      const item = this.filteredItems[i];
+    const lines = [
+      this.theme.fg("accent", this.theme.bold(` MODELLE › ${this.roleName}`)),
+      ...detailLines(this.theme, ` ${this.roleDescription}`, inner),
+      divider(this.theme, inner),
+      this.theme.fg(
+        "muted",
+        ` SUCHE · ${this.filteredItems.length}/${this.items.length} Modelle`,
+      ),
+      ...renderInput(this.searchInput, inner).map((line) => ` ${line}`),
+      divider(this.theme, inner),
+    ];
+    if (window.start > 0)
+      lines.push(this.theme.fg("dim", ` ↑ ${window.start} weitere Modelle`));
+    for (let index = window.start; index < window.end; index += 1) {
+      const item = this.filteredItems[index];
       if (!item) continue;
-      const line = renderModelLine(
-        this.theme,
-        item,
-        i === this.selectedIndex,
-        item.value === this.currentValue,
-      );
-      this.listContainer.addChild(new Text(line, 0, 0));
-    }
-
-    if (startIndex > 0 || endIndex < this.filteredItems.length) {
-      this.listContainer.addChild(
-        new Text(
-          this.theme.fg(
-            "muted",
-            `  (${this.selectedIndex + 1}/${this.filteredItems.length})`,
-          ),
-          0,
-          0,
+      lines.push(
+        renderModelLine(
+          this.theme,
+          item,
+          index === this.selectedIndex,
+          item.value === this.currentValue,
         ),
       );
     }
-
-    if (this.filteredItems.length === 0) {
-      this.listContainer.addChild(
-        new Text(this.theme.fg("muted", "  Keine passenden Modelle"), 0, 0),
+    if (window.end < this.filteredItems.length)
+      lines.push(
+        this.theme.fg(
+          "dim",
+          ` ↓ ${this.filteredItems.length - window.end} weitere Modelle`,
+        ),
       );
-    }
+    if (this.filteredItems.length === 0)
+      lines.push(this.theme.fg("muted", " Keine passenden Modelle."));
+    lines.push(divider(this.theme, inner));
+    lines.push(
+      this.theme.fg(
+        "dim",
+        compact
+          ? " ↑↓ wählen · Enter speichern · Esc zurück"
+          : " ↑↓ auswählen · Enter speichert · Esc zurück · Tippen filtert",
+      ),
+    );
+    return renderPanel(this.theme, width, lines);
   }
 
   handleInput(data: string): void {
     const kb = getKeybindings();
     if (kb.matches(data, "tui.select.up")) {
-      if (this.filteredItems.length === 0) return;
-      this.selectedIndex =
-        this.selectedIndex === 0
-          ? this.filteredItems.length - 1
-          : this.selectedIndex - 1;
-      this.updateList();
+      this.selectedIndex = movePickerIndex(
+        this.selectedIndex,
+        -1,
+        this.filteredItems.length,
+      );
       return;
     }
     if (kb.matches(data, "tui.select.down")) {
-      if (this.filteredItems.length === 0) return;
-      this.selectedIndex =
-        this.selectedIndex === this.filteredItems.length - 1
-          ? 0
-          : this.selectedIndex + 1;
-      this.updateList();
+      this.selectedIndex = movePickerIndex(
+        this.selectedIndex,
+        1,
+        this.filteredItems.length,
+      );
       return;
     }
     if (kb.matches(data, "tui.select.confirm")) {
-      const selected = this.filteredItems[this.selectedIndex];
-      this.done(selected?.value);
+      this.done(this.filteredItems[this.selectedIndex]?.value);
       return;
     }
     if (kb.matches(data, "tui.select.cancel")) {
@@ -330,7 +390,7 @@ class RoleModelSubmenu extends Container implements Component {
       return;
     }
     this.searchInput.handleInput(data);
-    this.filterItems(this.searchInput.getValue());
+    this.filterItems();
   }
 }
 
@@ -338,8 +398,18 @@ export interface RoleModelPickerResult {
   changed: boolean;
 }
 
-export class RoleModelPickerComponent extends Container implements Component {
-  private readonly settingsList: SettingsList;
+export class RoleModelPickerComponent implements Component {
+  private readonly theme: Theme;
+  private readonly modelItems: RoleModelItem[];
+  private readonly cwd: string;
+  private readonly done: (result: RoleModelPickerResult) => void;
+  private readonly tui: TUI;
+  private readonly searchInput = new Input();
+  private roles: PickableRole[];
+  private filteredRoles: PickableRole[];
+  private selectedIndex = 0;
+  private changed = false;
+  private submenu?: RoleModelSubmenu;
 
   constructor(
     tui: TUI,
@@ -349,57 +419,155 @@ export class RoleModelPickerComponent extends Container implements Component {
     cwd: string,
     done: (result: RoleModelPickerResult) => void,
   ) {
-    super();
-    let changed = false;
+    this.tui = tui;
+    this.theme = theme;
+    this.roles = roles.map((role) => ({ ...role }));
+    this.filteredRoles = this.roles;
+    this.modelItems = modelItems;
+    this.cwd = cwd;
+    this.done = done;
+  }
 
-    this.addChild(
-      new Text(theme.fg("accent", theme.bold("Subagenten-Rollen")), 0, 0),
+  invalidate(): void {
+    this.submenu?.invalidate();
+  }
+
+  private filterRoles(): void {
+    const query = this.searchInput.getValue();
+    this.filteredRoles = query
+      ? this.roles.filter((role) => matchesRole(role, query))
+      : this.roles;
+    this.selectedIndex = Math.min(
+      this.selectedIndex,
+      Math.max(0, this.filteredRoles.length - 1),
     );
-    this.addChild(
-      new Text(
-        theme.fg(
+  }
+
+  private openSubmenu(): void {
+    const role = this.filteredRoles[this.selectedIndex];
+    if (!role) return;
+    this.submenu = new RoleModelSubmenu(
+      this.theme,
+      role.name,
+      role.description,
+      this.modelItems,
+      role.currentModel ?? "",
+      (model) => {
+        this.submenu = undefined;
+        if (model) {
+          persistRoleModel(this.cwd, role.name, model);
+          role.currentModel = model;
+          this.changed = true;
+        }
+        this.tui.requestRender();
+      },
+    );
+  }
+
+  render(width: number): string[] {
+    if (this.submenu) return this.submenu.render(width);
+    const inner = Math.max(1, width - 2);
+    const compact = width < COMPACT_WIDTH;
+    const window = pickerWindow(
+      this.filteredRoles.length,
+      this.selectedIndex,
+      compact ? 4 : 6,
+    );
+    const selected = this.filteredRoles[this.selectedIndex];
+    const lines = [
+      this.theme.fg("accent", this.theme.bold(" ROLLEN-MODELLE")),
+      this.theme.fg(
+        "muted",
+        compact
+          ? " Modell je Rolle wählen · User-Override"
+          : " Modell pro Subagenten-Rolle wählen · wird als User-Override gespeichert",
+      ),
+      divider(this.theme, inner),
+      this.theme.fg(
+        "muted",
+        ` SUCHE · ${this.filteredRoles.length}/${this.roles.length} Rollen`,
+      ),
+      ...renderInput(this.searchInput, inner).map((line) => ` ${line}`),
+      divider(this.theme, inner),
+    ];
+    if (window.start > 0)
+      lines.push(this.theme.fg("dim", ` ↑ ${window.start} weitere Rollen`));
+    for (let index = window.start; index < window.end; index += 1) {
+      const role = this.filteredRoles[index];
+      if (!role) continue;
+      lines.push(renderRoleLine(this.theme, role, index === this.selectedIndex));
+      lines.push(
+        this.theme.fg(
           "muted",
-          "Enter wählt ein neues Modell · Änderungen werden sofort gespeichert",
+          `    ${role.currentModel ?? "Standardmodell"}`,
         ),
-        0,
-        0,
+      );
+    }
+    if (window.end < this.filteredRoles.length)
+      lines.push(
+        this.theme.fg(
+          "dim",
+          ` ↓ ${this.filteredRoles.length - window.end} weitere Rollen`,
+        ),
+      );
+    if (!selected)
+      lines.push(this.theme.fg("muted", " Keine passenden Rollen."));
+    else if (!compact) {
+      lines.push(divider(this.theme, inner));
+      lines.push(
+        this.theme.fg("muted", ` ${selected.description || "Keine Beschreibung."}`),
+      );
+      lines.push(
+        this.theme.fg(
+          "dim",
+          ` Herkunft: ${roleSourceLabel(selected.source)} · ${selected.currentModel ?? "Standardmodell"}`,
+        ),
+      );
+    }
+    lines.push(divider(this.theme, inner));
+    lines.push(
+      this.theme.fg(
+        "dim",
+        compact
+          ? " ↑↓ Rolle · Enter Modell · Esc schließen"
+          : " ↑↓ Rolle · Enter Modell wählen · Esc schließen · Tippen filtert",
       ),
     );
-    this.addChild(new Spacer(1));
-
-    const items: SettingItem[] = roles.map((role) => ({
-      id: role.name,
-      label: role.name,
-      description: role.description,
-      currentValue: role.currentModel ?? "(kein Modell gesetzt)",
-      submenu: (currentValue: string, submenuDone: (value?: string) => void) =>
-        new RoleModelSubmenu(
-          theme,
-          role.name,
-          role.description,
-          modelItems,
-          currentValue,
-          submenuDone,
-        ),
-    }));
-    this.settingsList = new SettingsList(
-      items,
-      Math.min(items.length, 10),
-      getSettingsListTheme(),
-      (id, newValue) => {
-        persistRoleModel(cwd, id, newValue);
-        changed = true;
-        this.settingsList.updateValue(id, newValue);
-        tui.requestRender();
-      },
-      () => done({ changed }),
-      { enableSearch: true },
-    );
-    this.addChild(this.settingsList);
+    return renderPanel(this.theme, width, lines);
   }
 
   handleInput(data: string): void {
-    this.settingsList.handleInput(data);
+    if (this.submenu) {
+      this.submenu.handleInput(data);
+      return;
+    }
+    const kb = getKeybindings();
+    if (kb.matches(data, "tui.select.up")) {
+      this.selectedIndex = movePickerIndex(
+        this.selectedIndex,
+        -1,
+        this.filteredRoles.length,
+      );
+      return;
+    }
+    if (kb.matches(data, "tui.select.down")) {
+      this.selectedIndex = movePickerIndex(
+        this.selectedIndex,
+        1,
+        this.filteredRoles.length,
+      );
+      return;
+    }
+    if (kb.matches(data, "tui.select.confirm")) {
+      this.openSubmenu();
+      return;
+    }
+    if (kb.matches(data, "tui.select.cancel")) {
+      this.done({ changed: this.changed });
+      return;
+    }
+    this.searchInput.handleInput(data);
+    this.filterRoles();
   }
 }
 
@@ -455,7 +623,13 @@ export function registerRoleModelCommand(pi: ExtensionAPI): void {
           ),
         {
           overlay: true,
-          overlayOptions: { anchor: "center", width: 84, maxHeight: "80%" },
+          overlayOptions: {
+            anchor: "center",
+            width: "80%",
+            minWidth: 24,
+            maxHeight: "80%",
+            margin: 1,
+          },
         },
       );
     },
