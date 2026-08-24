@@ -24,6 +24,7 @@ import { assertJsonSchemaObject } from "../runs/shared/structured-output.ts";
 import { validateAcceptanceInput } from "../runs/shared/acceptance.ts";
 import type { SlashSubagentResponse, SlashSubagentUpdate } from "./slash-bridge.ts";
 import { registerPromptWorkflowCommands } from "./prompt-workflows.ts";
+import { registerRoleModelCommand } from "./role-model-selector.ts";
 import {
 	applySlashUpdate,
 	buildSlashInitialResult,
@@ -1303,6 +1304,8 @@ export function registerSlashCommands(
 		pi,
 		run: (params, ctx) => runSlashSubagent(pi, ctx, params),
 	});
+
+	registerRoleModelCommand(pi);
 
 	pi.registerCommand("subagents-models", {
 		description: "Show runtime-loaded builtin subagent models",
