@@ -4,17 +4,18 @@ import type {
   Theme,
 } from "@earendil-works/pi-coding-agent";
 import {
-  getSelectListTheme,
+  DynamicBorder,
   getSettingsListTheme,
 } from "@earendil-works/pi-coding-agent";
 import {
   Container,
-  SelectList,
+  fuzzyFilter,
+  getKeybindings,
+  Input,
   SettingsList,
   Spacer,
   Text,
   type Component,
-  type SelectItem,
   type SettingItem,
   type TUI,
 } from "@earendil-works/pi-tui";
@@ -89,11 +90,18 @@ function resolveModelScope(cwd: string): ModelScopeConfig | undefined {
   return projectSettings.modelScope ?? userSettings.modelScope;
 }
 
+export interface RoleModelItem {
+  value: string;
+  provider: string;
+  id: string;
+  reasoning?: boolean;
+}
+
 /** Runtime-available models, narrowed to subagents.modelScope.allow when enforced. */
 export function buildModelItems(
   ctx: Pick<ExtensionContext, "modelRegistry">,
   cwd: string,
-): SelectItem[] {
+): RoleModelItem[] {
   const scope = resolveModelScope(cwd);
   const models: ModelInfo[] = ctx.modelRegistry.getAvailable().map(toModelInfo);
   const filtered =
@@ -108,8 +116,9 @@ export function buildModelItems(
     .sort((a, b) => a.fullId.localeCompare(b.fullId))
     .map((m) => ({
       value: m.fullId,
-      label: m.fullId,
-      description: m.reasoning ? "reasoning" : undefined,
+      provider: m.provider,
+      id: m.id,
+      reasoning: m.reasoning,
     }));
 }
 
@@ -136,32 +145,192 @@ function sendRoleModelText(pi: ExtensionAPI, text: string): void {
   });
 }
 
+/**
+ * Mirrors the row style of the real /model screen (accent "→ " cursor,
+ * muted "[provider]" badge, success "✓" on the currently active model) —
+ * "current" here is the role's prior override, not a session default.
+ */
+function renderModelLine(
+  theme: Theme,
+  item: RoleModelItem,
+  isSelected: boolean,
+  isCurrent: boolean,
+): string {
+  const providerBadge = theme.fg("muted", `[${item.provider}]`);
+  const checkmark = isCurrent ? theme.fg("success", " ✓") : "";
+  if (isSelected) {
+    const prefix = theme.fg("accent", "→ ");
+    return `${prefix}${theme.fg("accent", item.id)} ${providerBadge}${checkmark}`;
+  }
+  return `  ${item.id} ${providerBadge}${checkmark}`;
+}
+
+/**
+ * DynamicBorder's global theme singleton can be undefined for jiti-loaded
+ * extensions (separate module cache) — always pass an explicit color
+ * function, per dynamic-border.d.ts's own warning.
+ */
+function borderFor(theme: Theme): DynamicBorder {
+  return new DynamicBorder((s) => theme.fg("border", s));
+}
+
 class RoleModelSubmenu extends Container implements Component {
-  private readonly selectList: SelectList;
+  private readonly theme: Theme;
+  private readonly items: RoleModelItem[];
+  private readonly currentValue: string;
+  private readonly done: (value?: string) => void;
+  private readonly searchInput: Input;
+  private readonly listContainer: Container;
+  private filteredItems: RoleModelItem[];
+  private selectedIndex = 0;
 
   constructor(
+    theme: Theme,
     roleName: string,
+    roleDescription: string,
+    items: RoleModelItem[],
     currentValue: string,
-    items: SelectItem[],
     done: (value?: string) => void,
   ) {
     super();
-    this.addChild(new Text(`Modell für „${roleName}"`, 0, 0));
+    this.theme = theme;
+    this.items = items;
+    this.filteredItems = items;
+    this.currentValue = currentValue;
+    this.done = done;
+
+    this.addChild(borderFor(theme));
     this.addChild(new Spacer(1));
-    this.selectList = new SelectList(
-      items,
-      Math.min(items.length, 12),
-      getSelectListTheme(),
+    this.addChild(
+      new Text(
+        theme.fg("accent", theme.bold(`Modell für „${roleName}“`)),
+        0,
+        0,
+      ),
     );
+    if (roleDescription.trim()) {
+      this.addChild(new Text(theme.fg("muted", roleDescription), 0, 0));
+    }
+    this.addChild(new Spacer(1));
+
+    this.searchInput = new Input();
+    this.addChild(this.searchInput);
+    this.addChild(new Spacer(1));
+
+    this.listContainer = new Container();
+    this.addChild(this.listContainer);
+    this.addChild(new Spacer(1));
+
+    this.addChild(
+      new Text(
+        theme.fg("dim", "Enter") +
+          theme.fg("muted", " wählt · ") +
+          theme.fg("dim", "Esc") +
+          theme.fg("muted", " bricht ab · Tippen filtert"),
+        0,
+        0,
+      ),
+    );
+    this.addChild(borderFor(theme));
+
     const idx = items.findIndex((item) => item.value === currentValue);
-    if (idx !== -1) this.selectList.setSelectedIndex(idx);
-    this.selectList.onSelect = (item) => done(item.value);
-    this.selectList.onCancel = () => done(undefined);
-    this.addChild(this.selectList);
+    this.selectedIndex = idx !== -1 ? idx : 0;
+    this.updateList();
+  }
+
+  private filterItems(query: string): void {
+    this.filteredItems = query
+      ? fuzzyFilter(
+          this.items,
+          query,
+          (item) => `${item.id} ${item.provider} ${item.provider}/${item.id}`,
+        )
+      : this.items;
+    this.selectedIndex = Math.min(
+      this.selectedIndex,
+      Math.max(0, this.filteredItems.length - 1),
+    );
+    this.updateList();
+  }
+
+  private updateList(): void {
+    this.listContainer.clear();
+    const maxVisible = 10;
+    const startIndex = Math.max(
+      0,
+      Math.min(
+        this.selectedIndex - Math.floor(maxVisible / 2),
+        this.filteredItems.length - maxVisible,
+      ),
+    );
+    const endIndex = Math.min(
+      startIndex + maxVisible,
+      this.filteredItems.length,
+    );
+
+    for (let i = startIndex; i < endIndex; i++) {
+      const item = this.filteredItems[i];
+      if (!item) continue;
+      const line = renderModelLine(
+        this.theme,
+        item,
+        i === this.selectedIndex,
+        item.value === this.currentValue,
+      );
+      this.listContainer.addChild(new Text(line, 0, 0));
+    }
+
+    if (startIndex > 0 || endIndex < this.filteredItems.length) {
+      this.listContainer.addChild(
+        new Text(
+          this.theme.fg(
+            "muted",
+            `  (${this.selectedIndex + 1}/${this.filteredItems.length})`,
+          ),
+          0,
+          0,
+        ),
+      );
+    }
+
+    if (this.filteredItems.length === 0) {
+      this.listContainer.addChild(
+        new Text(this.theme.fg("muted", "  Keine passenden Modelle"), 0, 0),
+      );
+    }
   }
 
   handleInput(data: string): void {
-    this.selectList.handleInput(data);
+    const kb = getKeybindings();
+    if (kb.matches(data, "tui.select.up")) {
+      if (this.filteredItems.length === 0) return;
+      this.selectedIndex =
+        this.selectedIndex === 0
+          ? this.filteredItems.length - 1
+          : this.selectedIndex - 1;
+      this.updateList();
+      return;
+    }
+    if (kb.matches(data, "tui.select.down")) {
+      if (this.filteredItems.length === 0) return;
+      this.selectedIndex =
+        this.selectedIndex === this.filteredItems.length - 1
+          ? 0
+          : this.selectedIndex + 1;
+      this.updateList();
+      return;
+    }
+    if (kb.matches(data, "tui.select.confirm")) {
+      const selected = this.filteredItems[this.selectedIndex];
+      this.done(selected?.value);
+      return;
+    }
+    if (kb.matches(data, "tui.select.cancel")) {
+      this.done(undefined);
+      return;
+    }
+    this.searchInput.handleInput(data);
+    this.filterItems(this.searchInput.getValue());
   }
 }
 
@@ -174,21 +343,44 @@ export class RoleModelPickerComponent extends Container implements Component {
 
   constructor(
     tui: TUI,
-    _theme: Theme,
+    theme: Theme,
     roles: PickableRole[],
-    modelItems: SelectItem[],
+    modelItems: RoleModelItem[],
     cwd: string,
     done: (result: RoleModelPickerResult) => void,
   ) {
     super();
     let changed = false;
+
+    this.addChild(
+      new Text(theme.fg("accent", theme.bold("Subagenten-Rollen")), 0, 0),
+    );
+    this.addChild(
+      new Text(
+        theme.fg(
+          "muted",
+          "Enter wählt ein neues Modell · Änderungen werden sofort gespeichert",
+        ),
+        0,
+        0,
+      ),
+    );
+    this.addChild(new Spacer(1));
+
     const items: SettingItem[] = roles.map((role) => ({
       id: role.name,
       label: role.name,
       description: role.description,
       currentValue: role.currentModel ?? "(kein Modell gesetzt)",
       submenu: (currentValue: string, submenuDone: (value?: string) => void) =>
-        new RoleModelSubmenu(role.name, currentValue, modelItems, submenuDone),
+        new RoleModelSubmenu(
+          theme,
+          role.name,
+          role.description,
+          modelItems,
+          currentValue,
+          submenuDone,
+        ),
     }));
     this.settingsList = new SettingsList(
       items,
