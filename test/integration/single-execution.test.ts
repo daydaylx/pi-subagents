@@ -1029,7 +1029,7 @@ describe("single sync execution", { skip: !available ? "pi packages not availabl
 	});
 
 	it("tracks live activity updates and exposes artifact paths while running", async () => {
-		const updates: Array<{ details?: { results?: Array<{ artifactPaths?: ArtifactPaths }>; progress?: ProgressSummary[] } }> = [];
+		const updates: Array<{ details?: { results?: Array<{ artifactPaths?: ArtifactPaths; messages?: unknown; finalOutput?: string }>; progress?: ProgressSummary[] } }> = [];
 		mockPi.onCall({
 			steps: [
 				{ jsonl: [events.toolStart("read", { path: "package.json" })], delay: 20 },
@@ -1044,7 +1044,7 @@ describe("single sync execution", { skip: !available ? "pi packages not availabl
 			runId: "live-progress",
 			artifactsDir,
 			artifactConfig: { enabled: true, includeInput: true, includeOutput: true, includeMetadata: true },
-			onUpdate: (update: { details?: { results?: Array<{ artifactPaths?: ArtifactPaths }>; progress?: ProgressSummary[] } }) => {
+			onUpdate: (update: { details?: { results?: Array<{ artifactPaths?: ArtifactPaths; messages?: unknown; finalOutput?: string }>; progress?: ProgressSummary[] } }) => {
 				updates.push(update);
 			},
 		});
@@ -1060,6 +1060,9 @@ describe("single sync execution", { skip: !available ? "pi packages not availabl
 		assert.equal(typeof runningToolUpdate?.details?.progress?.[0]?.currentToolStartedAt, "number");
 		assert.equal(typeof result.progress.lastActivityAt, "number");
 		assert.equal(result.progress.currentToolStartedAt, undefined);
+		assert.equal(updates.every((update) => update.details?.results?.[0]?.messages === undefined), true);
+		assert.equal(updates.every((update) => update.details?.results?.[0]?.finalOutput === undefined), true);
+		assert.equal(result.messages?.some((message) => message.role === "assistant"), true, "the final result retains the complete child transcript");
 	});
 
 	it("sets progress.status to failed on non-zero exit", async () => {

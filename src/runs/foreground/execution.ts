@@ -125,9 +125,18 @@ function buildSkippedAcceptanceLedger(acceptance: ResolvedAcceptanceConfig, inpu
 	};
 }
 
+const MAX_LIVE_OUTPUT_LINE_CHARS = 512;
+const MAX_LIVE_TASK_CHARS = 2_048;
+
+function truncateLiveText(text: string, maxChars: number): string {
+	return text.length > maxChars ? `${text.slice(0, maxChars - 1)}…` : text;
+}
+
 function appendRecentOutput(progress: AgentProgress, lines: string[]): void {
 	if (lines.length === 0) return;
-	progress.recentOutput.push(...lines.filter((line) => line.trim()));
+	progress.recentOutput.push(...lines
+		.filter((line) => line.trim())
+		.map((line) => truncateLiveText(line, MAX_LIVE_OUTPUT_LINE_CHARS)));
 	if (progress.recentOutput.length > 50) {
 		progress.recentOutput.splice(0, progress.recentOutput.length - 50);
 	}
@@ -147,13 +156,14 @@ function stripAcceptanceReportsFromMessages(messages: Message[] | undefined): vo
 function snapshotProgress(progress: AgentProgress): AgentProgress {
 	return {
 		...progress,
+		task: truncateLiveText(progress.task, MAX_LIVE_TASK_CHARS),
 		skills: progress.skills ? [...progress.skills] : undefined,
 		recentTools: progress.recentTools.map((tool) => ({ ...tool })),
 		recentOutput: [...progress.recentOutput],
 	};
 }
 
-function snapshotResult(result: SingleResult, progress: AgentProgress): SingleResult {
+function snapshotCompleteResult(result: SingleResult, progress: AgentProgress): SingleResult {
 	return {
 		...result,
 		messages: result.outputMode === "file-only" && result.savedOutputPath ? undefined : result.messages ? [...result.messages] : undefined,
@@ -172,6 +182,45 @@ function snapshotResult(result: SingleResult, progress: AgentProgress): SingleRe
 		artifactPaths: result.artifactPaths ? { ...result.artifactPaths } : undefined,
 		truncation: result.truncation ? { ...result.truncation } : undefined,
 		outputReference: result.outputReference ? { ...result.outputReference } : undefined,
+	};
+}
+
+function snapshotLiveResult(result: SingleResult, progress: AgentProgress): SingleResult {
+	// Updates are persisted verbatim by Pi. Keep the live UI data, but reserve
+	// the growing child transcript and full output for the final tool result.
+	return {
+		agent: result.agent,
+		task: progress.task,
+		exitCode: result.exitCode,
+		detached: result.detached,
+		detachedReason: result.detachedReason,
+		interrupted: result.interrupted,
+		timedOut: result.timedOut,
+		stopped: result.stopped,
+		turnBudget: result.turnBudget ? { ...result.turnBudget } : undefined,
+		turnBudgetExceeded: result.turnBudgetExceeded,
+		wrapUpRequested: result.wrapUpRequested,
+		toolBudget: result.toolBudget ? { ...result.toolBudget } : undefined,
+		toolBudgetBlocked: result.toolBudgetBlocked,
+		usage: { ...result.usage },
+		model: result.model,
+		attemptedModels: result.attemptedModels ? [...result.attemptedModels] : undefined,
+		error: result.error ? truncateLiveText(result.error, MAX_LIVE_OUTPUT_LINE_CHARS) : undefined,
+		sessionFile: result.sessionFile,
+		skills: result.skills ? [...result.skills] : undefined,
+		skillsWarning: result.skillsWarning,
+		progress,
+		progressSummary: result.progressSummary ? { ...result.progressSummary } : undefined,
+		artifactPaths: result.artifactPaths ? { ...result.artifactPaths } : undefined,
+		truncation: result.truncation ? { ...result.truncation } : undefined,
+		outputMode: result.outputMode,
+		savedOutputPath: result.savedOutputPath,
+		outputReference: result.outputReference ? { ...result.outputReference } : undefined,
+		outputSaveError: result.outputSaveError,
+		structuredOutputPath: result.structuredOutputPath,
+		structuredOutputSchemaPath: result.structuredOutputSchemaPath,
+		transcriptPath: result.transcriptPath,
+		transcriptError: result.transcriptError,
 	};
 }
 
@@ -605,13 +654,13 @@ async function runSingleAttempt(
 		};
 
 
-		const emitUpdateSnapshot = (text: string) => {
+		const emitUpdateSnapshot = () => {
 			if (!options.onUpdate || processClosed) return;
 			const progressSnapshot = snapshotProgress(progress);
-			const resultSnapshot = snapshotResult(result, progressSnapshot);
+			const resultSnapshot = snapshotLiveResult(result, progressSnapshot);
 			const controlEvents = drainPendingControlEvents();
 			options.onUpdate({
-				content: [{ type: "text", text }],
+				content: [{ type: "text", text: `(${progressSnapshot.status ?? "running"}...)` }],
 				details: {
 					mode: "single",
 					results: [resultSnapshot],
@@ -624,8 +673,7 @@ async function runSingleAttempt(
 		const fireUpdate = () => {
 			if (!options.onUpdate || processClosed) return;
 			progress.durationMs = Date.now() - startTime;
-			const output = (result.timedOut || result.turnBudgetExceeded) && result.finalOutput ? result.finalOutput : getFinalOutput(result.messages);
-			emitUpdateSnapshot(output || "(running...)");
+			emitUpdateSnapshot();
 		};
 
 		const processLine = (line: string) => {
@@ -842,7 +890,7 @@ async function runSingleAttempt(
 			const finalCode = forcedDrainAfterFinalSuccess ? 0 : forcedTerminationSignal || signal ? (code ?? 1) : (code ?? 0);
 			if (detached) {
 				const recoveredProgress = snapshotProgress(progress);
-				const recoveredResult = snapshotResult(result, recoveredProgress);
+				const recoveredResult = snapshotCompleteResult(result, recoveredProgress);
 				if (!recoveredResult.error && closeError) recoveredResult.error = closeError;
 				recoveredResult.exitCode = recoveredResult.error && finalCode === 0 ? 1 : finalCode;
 				recoveredProgress.status = recoveredResult.exitCode === 0 ? "completed" : "failed";
@@ -1074,11 +1122,10 @@ async function runSingleAttempt(
 		: fullOutput;
 	result.controlEvents = allControlEvents.length ? allControlEvents : undefined;
 	if (options.onUpdate) {
-		const finalText = result.finalOutput || result.error || "(no output)";
 		const progressSnapshot = snapshotProgress(progress);
-		const resultSnapshot = snapshotResult(result, progressSnapshot);
+		const resultSnapshot = snapshotLiveResult(result, progressSnapshot);
 		options.onUpdate({
-			content: [{ type: "text", text: finalText }],
+			content: [{ type: "text", text: `(${progressSnapshot.status ?? "completed"}...)` }],
 			details: {
 				mode: "single",
 				results: [resultSnapshot],
