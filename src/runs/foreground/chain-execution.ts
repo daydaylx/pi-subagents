@@ -391,7 +391,13 @@ async function runParallelChainTasks(input: ParallelChainRunInput): Promise<Sing
 			if (result.exitCode !== 0 && failFast) {
 				aborted = true;
 			}
-			recordRun(task.agent, cleanTask, result.exitCode, result.progressSummary?.durationMs ?? 0);
+			const stepUsage = sumResultsUsage([result]);
+			const stepCost = sumResultsCost([result]);
+			recordRun(task.agent, cleanTask, result.exitCode, result.progressSummary?.durationMs ?? 0, {
+				cwd: taskCwd,
+				tokens: { input: stepUsage.input, output: stepUsage.output, cacheRead: stepUsage.cacheRead, cacheWrite: stepUsage.cacheWrite },
+				cost: stepCost.costUsd,
+			});
 			return result;
 		},
 		input.globalSemaphore,
@@ -1250,7 +1256,13 @@ export async function executeChain(params: ChainExecutionParams): Promise<ChainE
 				foregroundControl.interrupt = undefined;
 				foregroundControl.updatedAt = Date.now();
 			}
-			recordRun(seqStep.agent, cleanTask, r.exitCode, r.progressSummary?.durationMs ?? 0);
+			const seqUsage = sumResultsUsage([r]);
+			const seqCost = sumResultsCost([r]);
+			recordRun(seqStep.agent, cleanTask, r.exitCode, r.progressSummary?.durationMs ?? 0, {
+				cwd: resolveChildCwd(cwd ?? ctx.cwd, seqStep.cwd),
+				tokens: { input: seqUsage.input, output: seqUsage.output, cacheRead: seqUsage.cacheRead, cacheWrite: seqUsage.cacheWrite },
+				cost: seqCost.costUsd,
+			});
 
 			globalTaskIndex++;
 			results.push(r);

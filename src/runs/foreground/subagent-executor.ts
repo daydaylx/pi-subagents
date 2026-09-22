@@ -2725,7 +2725,13 @@ async function runParallelPath(data: ExecutionContextData, deps: ExecutorDeps): 
 		});
 		for (let i = 0; i < results.length; i++) {
 			const run = results[i]!;
-			recordRun(run.agent, taskTexts[i]!, run.exitCode, run.progressSummary?.durationMs ?? 0);
+			const runUsage = sumResultsUsage([run]);
+			const runCost = sumResultsCost([run]);
+			recordRun(run.agent, taskTexts[i]!, run.exitCode, run.progressSummary?.durationMs ?? 0, {
+				cwd: effectiveCwd,
+				tokens: { input: runUsage.input, output: runUsage.output, cacheRead: runUsage.cacheRead, cacheWrite: runUsage.cacheWrite },
+				cost: runCost.costUsd,
+			});
 		}
 
 		for (const result of results) {
@@ -3045,7 +3051,13 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 		foregroundControl.toolCount = r.progress?.toolCount;
 		foregroundControl.updatedAt = Date.now();
 	}
-	recordRun(params.agent!, cleanTask, r.exitCode, r.progressSummary?.durationMs ?? 0);
+	const singleUsage = sumResultsUsage([r]);
+	const singleCost = sumResultsCost([r]);
+	recordRun(params.agent!, cleanTask, r.exitCode, r.progressSummary?.durationMs ?? 0, {
+		cwd: effectiveCwd,
+		tokens: { input: singleUsage.input, output: singleUsage.output, cacheRead: singleUsage.cacheRead, cacheWrite: singleUsage.cacheWrite },
+		cost: singleCost.costUsd,
+	});
 
 	if (r.progress) allProgress.push(r.progress);
 	if (r.artifactPaths) allArtifactPaths.push(r.artifactPaths);

@@ -9,6 +9,13 @@ export interface RunEntry {
 	status: "ok" | "error";
 	duration: number;
 	exit?: number;
+	// cwd ist noetig, weil run-history.jsonl global unter getAgentDir() liegt
+	// (nicht pro Worktree/Session isoliert) -- ohne cwd laesst sich ein
+	// bestimmter Lauf (z.B. ein real-duel-Benchmark-Trial) nicht von anderer,
+	// gleichzeitiger Pi-Nutzung auf derselben Maschine unterscheiden.
+	cwd?: string;
+	tokens?: { input: number; output: number; cacheRead?: number; cacheWrite?: number };
+	cost?: number;
 }
 
 const ROTATE_READ_THRESHOLD = 1200;
@@ -18,7 +25,19 @@ function getHistoryPath(): string {
 	return path.join(getAgentDir(), "run-history.jsonl");
 }
 
-export function recordRun(agent: string, task: string, exitCode: number, durationMs: number): void {
+export interface RecordRunExtras {
+	cwd?: string;
+	tokens?: { input: number; output: number; cacheRead?: number; cacheWrite?: number };
+	cost?: number;
+}
+
+export function recordRun(
+	agent: string,
+	task: string,
+	exitCode: number,
+	durationMs: number,
+	extras?: RecordRunExtras,
+): void {
 	try {
 		const entry: RunEntry = {
 			agent,
@@ -27,6 +46,9 @@ export function recordRun(agent: string, task: string, exitCode: number, duratio
 			status: exitCode === 0 ? "ok" : "error",
 			duration: durationMs,
 			...(exitCode !== 0 ? { exit: exitCode } : {}),
+			...(extras?.cwd ? { cwd: extras.cwd } : {}),
+			...(extras?.tokens ? { tokens: extras.tokens } : {}),
+			...(typeof extras?.cost === "number" ? { cost: extras.cost } : {}),
 		};
 		const historyPath = getHistoryPath();
 		fs.mkdirSync(path.dirname(historyPath), { recursive: true });
@@ -55,6 +77,6 @@ export function loadRunsForAgent(agent: string): RunEntry[] {
 
 	return lines
 		.map((line) => { try { return JSON.parse(line) as RunEntry; } catch { return undefined; } })
-		.filter((entry): entry is RunEntry => Boolean(entry) && entry.agent === agent)
+		.filter((entry): entry is RunEntry => entry !== undefined && entry.agent === agent)
 		.reverse();
 }
