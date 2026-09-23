@@ -753,7 +753,7 @@ async function runSingleAttempt(
 			}
 
 			if (evt.type === "message_end" && evt.message) {
-				result.messages.push(evt.message);
+				(result.messages ??= []).push(evt.message);
 				if (evt.message.role === "assistant") {
 					result.usage.turns++;
 					progress.turnCount = result.usage.turns;
@@ -787,7 +787,7 @@ async function runSingleAttempt(
 			}
 
 			if (evt.type === "tool_result_end" && evt.message) {
-				result.messages.push(evt.message);
+				(result.messages ??= []).push(evt.message);
 				const resultText = extractTextFromContent(evt.message.content);
 				if (options.toolBudget && pendingToolResult && resultText.includes("Tool budget hard limit reached")) {
 					result.toolBudgetBlocked = true;
@@ -1018,7 +1018,7 @@ async function runSingleAttempt(
 		result.exitCode = 1;
 	}
 	if (result.exitCode === 0 && !result.error) {
-		const errInfo = detectSubagentError(result.messages);
+			const errInfo = detectSubagentError(result.messages ?? []);
 		if (errInfo.hasError) {
 			result.exitCode = errInfo.exitCode ?? 1;
 			result.error = errInfo.details
@@ -1027,7 +1027,7 @@ async function runSingleAttempt(
 		}
 	}
 	if (result.exitCode === 0 && !result.error) {
-		const finalText = getFinalOutput(result.messages);
+			const finalText = getFinalOutput(result.messages ?? []);
 		const missingStructuredOutput = options.structuredOutput
 			? !existsSync(options.structuredOutput.outputPath)
 			: false;
@@ -1067,7 +1067,7 @@ async function runSingleAttempt(
 		durationMs: progress.durationMs,
 	};
 
-	const acceptanceOutput = getFinalOutput(result.messages);
+	const acceptanceOutput = getFinalOutput(result.messages ?? []);
 	let fullOutput = stripAcceptanceReport(acceptanceOutput);
 	if (result.timedOut) {
 		const timeoutMessage = formatTimeoutMessage(options.timeoutMs ?? 0);
@@ -1084,7 +1084,7 @@ async function runSingleAttempt(
 		? evaluateCompletionMutationGuard({
 			agent: agent.name,
 			task: shared.originalTask ?? task,
-			messages: result.messages,
+			messages: result.messages ?? [],
 			tools: agent.tools,
 			mcpDirectTools: agent.mcpDirectTools,
 		})

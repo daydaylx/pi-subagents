@@ -6,7 +6,7 @@ import { execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { getAgentDir, getProjectConfigDir } from "../shared/utils.ts";
+import { getAgentDir, getHomeDir, getProjectConfigDir } from "../shared/utils.ts";
 
 export type SkillSource =
 	| "project"
@@ -202,7 +202,7 @@ function collectSettingsSkillPaths(cwd: string, agentDir: string): SkillSearchPa
 			if (typeof entry !== "string") continue;
 			let resolved = entry;
 			if (resolved.startsWith("~/")) {
-				resolved = path.join(os.homedir(), resolved.slice(2));
+				resolved = path.join(getHomeDir(), resolved.slice(2));
 			} else if (!path.isAbsolute(resolved)) {
 				resolved = path.resolve(base, resolved);
 			}
@@ -278,8 +278,8 @@ function resolveSettingsPackageRoot(source: string, baseDir: string): string | u
 		return packageName ? path.join(baseDir, "npm", "node_modules", packageName) : undefined;
 	}
 	const normalized = trimmed.startsWith("file:") ? trimmed.slice(5) : trimmed;
-	if (normalized === "~") return os.homedir();
-	if (normalized.startsWith("~/")) return path.join(os.homedir(), normalized.slice(2));
+	if (normalized === "~") return getHomeDir();
+	if (normalized.startsWith("~/")) return path.join(getHomeDir(), normalized.slice(2));
 	if (path.isAbsolute(normalized)) return normalized;
 	if (normalized === "." || normalized === ".." || normalized.startsWith("./") || normalized.startsWith("../")) {
 		return path.resolve(baseDir, normalized);
@@ -324,7 +324,7 @@ function buildSkillPaths(cwd: string, agentDir: string): SkillSearchPath[] {
 		{ path: path.join(projectConfigDir, "skills"), source: "project" },
 		{ path: path.join(cwd, ".agents", "skills"), source: "project" },
 		{ path: path.join(agentDir, "skills"), source: "user" },
-		{ path: path.join(os.homedir(), ".agents", "skills"), source: "user" },
+		{ path: path.join(getHomeDir(), ".agents", "skills"), source: "user" },
 		...collectInstalledPackageSkillPaths(cwd, agentDir),
 		...collectSettingsPackageSkillPaths(cwd, agentDir),
 		...extractSkillPathsFromPackageRoot(cwd, "project-package"),
@@ -352,7 +352,7 @@ function inferSkillSource(filePath: string, cwd: string, agentDir: string, sourc
 	const userSkillsRoot = path.resolve(agentDir, "skills");
 	const userPackagesRoot = path.resolve(agentDir, "npm", "node_modules");
 	const userAgentRoot = path.resolve(agentDir);
-	const userAgentsRoot = path.resolve(os.homedir(), ".agents");
+	const userAgentsRoot = path.resolve(getHomeDir(), ".agents");
 
 	if (isWithinPath(filePath, projectPackagesRoot)) return "project-package";
 	if (isWithinPath(filePath, projectSkillsRoot) || isWithinPath(filePath, projectAgentsRoot)) return "project";

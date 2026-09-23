@@ -344,15 +344,12 @@ function renderMultiCompact(
     const progressFromArray =
       d.progress?.find((p) => p.index === i) ||
       d.progress?.find((p) => p.agent === r.agent && p.status === "running");
-    const rProg = r.progress || progressFromArray || r.progressSummary;
-    const rRunning = rProg && "status" in rProg && rProg.status === "running";
-    const rPending = rProg && "status" in rProg && rProg.status === "pending";
+    const liveProgress = r.progress || progressFromArray;
+    const rProg = liveProgress || r.progressSummary;
+    const rRunning = liveProgress?.status === "running";
+    const rPending = liveProgress?.status === "pending";
     const stepNumber =
-      r.progress?.index !== undefined
-        ? r.progress.index + 1
-        : progressFromArray?.index !== undefined
-          ? progressFromArray.index + 1
-          : i + 1;
+      liveProgress?.index !== undefined ? liveProgress.index + 1 : i + 1;
     const stepStats = formatProgressStats(theme, rProg);
     const glyph = rPending
       ? theme.fg("dim", "◦")
@@ -368,8 +365,8 @@ function renderMultiCompact(
     const stepLabel = resultRowLabel(d, multiLabel, i, stepNumber);
     const line = `${glyph} ${stepLabel}: ${theme.bold(agentName)}${stepStats ? ` ${theme.fg("dim", "·")} ${stepStats}` : ""}${pendingLabel}`;
     c.addChild(new Text(truncLine(`  ${line}`, width), 0, 0));
-    if (rRunning && rProg && "status" in rProg) {
-      const activity = compactCurrentActivity(rProg);
+    if (rRunning && liveProgress) {
+      const activity = compactCurrentActivity(liveProgress);
       c.addChild(
         new Text(truncLine(theme.fg("dim", `    ⎿  ${activity}`), width), 0, 0),
       );
@@ -833,10 +830,11 @@ export function renderSubagentResult(
     const progressFromArray =
       d.progress?.find((p) => p.index === i) ||
       d.progress?.find((p) => p.agent === r.agent && p.status === "running");
-    const rProg = r.progress || progressFromArray || r.progressSummary;
-    const rRunning = rProg?.status === "running";
+    const liveProgress = r.progress || progressFromArray;
+    const rProg = liveProgress || r.progressSummary;
+    const rRunning = liveProgress?.status === "running";
     const stepNumber =
-      typeof rProg?.index === "number" ? rProg.index + 1 : i + 1;
+      typeof liveProgress?.index === "number" ? liveProgress.index + 1 : i + 1;
 
     const resultOutput = getSingleResultOutput(r);
     const statusIcon = rRunning
@@ -903,19 +901,19 @@ export function renderSubagentResult(
       );
     }
 
-    if (rRunning && rProg) {
-      if (rProg.skills?.length) {
+    if (rRunning && liveProgress) {
+      if (liveProgress.skills?.length) {
         c.addChild(
           new Text(
-            fit(theme.fg("accent", `    skills: ${rProg.skills.join(", ")}`)),
+            fit(theme.fg("accent", `    skills: ${liveProgress.skills.join(", ")}`)),
             0,
             0,
           ),
         );
       }
-      const progressSnapshotNow = snapshotNowForProgress(rProg);
+      const progressSnapshotNow = snapshotNowForProgress(liveProgress);
       const toolLine = formatCurrentToolLine(
-        rProg,
+        liveProgress,
         w,
         expanded,
         progressSnapshotNow,
@@ -925,7 +923,7 @@ export function renderSubagentResult(
           new Text(fit(theme.fg("warning", `    > ${toolLine}`)), 0, 0),
         );
       }
-      const liveStatusLine = buildLiveStatusLine(rProg, progressSnapshotNow);
+      const liveStatusLine = buildLiveStatusLine(liveProgress, progressSnapshotNow);
       if (liveStatusLine) {
         c.addChild(
           new Text(fit(theme.fg("accent", `    ${liveStatusLine}`)), 0, 0),
@@ -948,8 +946,8 @@ export function renderSubagentResult(
           ),
         );
       }
-      if (rProg.recentTools?.length) {
-        for (const t of rProg.recentTools.slice(-3)) {
+      if (liveProgress.recentTools?.length) {
+        for (const t of liveProgress.recentTools.slice(-3)) {
           const maxArgsLen = Math.max(40, w - 30);
           const argsPreview =
             expanded || t.args.length <= maxArgsLen
@@ -964,7 +962,7 @@ export function renderSubagentResult(
           );
         }
       }
-      const recentLines = (rProg.recentOutput ?? []).slice(-5);
+      const recentLines = (liveProgress.recentOutput ?? []).slice(-5);
       for (const line of recentLines) {
         c.addChild(new Text(fit(theme.fg("dim", `      ${line}`)), 0, 0));
       }

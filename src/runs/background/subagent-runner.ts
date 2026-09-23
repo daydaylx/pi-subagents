@@ -1529,7 +1529,7 @@ async function runSubagent(config: SubagentRunConfig): Promise<void> {
 					skills: task.skills,
 					model: task.model,
 					thinking: task.thinking,
-					attemptedModels: task.modelCandidates && task.modelCandidates.length > 0 ? task.modelCandidates : task.model ? [task.model] : undefined,
+					attemptedModels: task.modelCandidates?.filter((candidate): candidate is string => Boolean(candidate)).length ? task.modelCandidates.filter((candidate): candidate is string => Boolean(candidate)) : task.model ? [task.model] : undefined,
 					recentTools: [],
 					recentOutput: [],
 				});
@@ -1565,7 +1565,7 @@ async function runSubagent(config: SubagentRunConfig): Promise<void> {
 				skills: step.skills,
 				model: step.model,
 				thinking: step.thinking,
-				attemptedModels: step.modelCandidates && step.modelCandidates.length > 0 ? step.modelCandidates : step.model ? [step.model] : undefined,
+				attemptedModels: step.modelCandidates?.filter((candidate): candidate is string => Boolean(candidate)).length ? step.modelCandidates.filter((candidate): candidate is string => Boolean(candidate)) : step.model ? [step.model] : undefined,
 				recentTools: [],
 				recentOutput: [],
 			});
@@ -2454,19 +2454,23 @@ async function runSubagent(config: SubagentRunConfig): Promise<void> {
 				continue;
 			}
 
-			const dynamicSteps = materialized.parallel.map((task, itemIndex) => {
+			const dynamicSteps: SubagentStep[] = materialized.parallel.map((task, itemIndex) => {
 				const thinkingOverride = step.thinkingOverrides?.[itemIndex];
 				const model = thinkingOverride ? applyThinkingSuffix(step.parallel.model, thinkingOverride, true) : step.parallel.model;
 				const thinking = thinkingOverride ? resolveEffectiveThinking(model, thinkingOverride) : undefined;
 				return {
 					...step.parallel,
-					task: task.task ?? step.parallel.task,
+					task: task.task ?? step.parallel.task ?? "",
 					label: task.label ?? step.parallel.label,
 					...(step.sessionFiles?.[itemIndex] ? { sessionFile: step.sessionFiles[itemIndex] } : {}),
 					...(thinkingOverride ? {
 						...(model ? { model } : {}),
 						...(thinking ? { thinking } : {}),
-						...(step.parallel.modelCandidates ? { modelCandidates: step.parallel.modelCandidates.map((candidate) => applyThinkingSuffix(candidate, thinkingOverride, true)) } : {}),
+						...(step.parallel.modelCandidates ? {
+							modelCandidates: step.parallel.modelCandidates
+								.map((candidate) => applyThinkingSuffix(candidate, thinkingOverride, true))
+								.filter((candidate): candidate is string => Boolean(candidate)),
+						} : {}),
 					} : {}),
 					structuredOutput: undefined,
 					structuredOutputSchema: step.parallel.structuredOutputSchema ?? step.parallel.structuredOutput?.schema,
@@ -2487,7 +2491,7 @@ async function runSubagent(config: SubagentRunConfig): Promise<void> {
 					skills: task.skills,
 					model: task.model,
 					thinking: task.thinking,
-					attemptedModels: task.modelCandidates && task.modelCandidates.length > 0 ? task.modelCandidates : task.model ? [task.model] : undefined,
+					attemptedModels: task.modelCandidates?.filter((candidate): candidate is string => Boolean(candidate)).length ? task.modelCandidates.filter((candidate): candidate is string => Boolean(candidate)) : task.model ? [task.model] : undefined,
 					recentTools: [],
 					recentOutput: [],
 				};
@@ -2673,7 +2677,17 @@ async function runSubagent(config: SubagentRunConfig): Promise<void> {
 					watchdog: pr.watchdog,
 				});
 			}
-			const collection = collectDynamicResults(step as Parameters<typeof collectDynamicResults>[0], materialized.items, parallelResults);
+			const collection = collectDynamicResults(step, materialized.items, parallelResults.map((result) => ({
+				agent: result.agent,
+				exitCode: result.exitCode,
+				error: result.error,
+				timedOut: result.timedOut,
+				stopped: result.stopped,
+				structuredOutput: result.structuredOutput,
+				artifactPaths: result.artifactPaths,
+				savedOutputPath: undefined,
+				output: result.output,
+			})));
 			const failures = parallelResults.filter((result) => result.exitCode !== 0 && result.exitCode !== -1);
 			if (failures.length === 0) {
 				try {
@@ -2690,7 +2704,7 @@ async function runSubagent(config: SubagentRunConfig): Promise<void> {
 							acceptance: step.effectiveAcceptance,
 							output: "",
 							report: aggregateAcceptanceReport({
-								results: parallelResults,
+							results: parallelResults.map((result) => ({ ...result, exitCode: result.exitCode ?? 1 })),
 								notes: `Dynamic fanout collected ${collection.length} result(s) into ${step.collect.as}.`,
 							}),
 							cwd,

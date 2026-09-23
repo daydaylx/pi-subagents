@@ -9,6 +9,7 @@ import { WAIT_TOOL_ENABLED_ENV } from "../../src/runs/background/wait.ts";
 import { SUBAGENT_CHILD_ENV, SUBAGENT_FANOUT_CHILD_ENV } from "../../src/runs/shared/pi-args.ts";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+const testNode = process.platform === "linux" && fs.existsSync("/usr/bin/node") ? "/usr/bin/node" : process.execPath;
 
 function parentToolEnv(): NodeJS.ProcessEnv {
 	const env = { ...process.env };
@@ -58,7 +59,7 @@ describe("subagent extension child mode", () => {
 		`;
 
 		execFileSync(
-			process.execPath,
+			testNode,
 			[
 				"--experimental-transform-types",
 				"--import",
@@ -102,7 +103,7 @@ describe("subagent extension child mode", () => {
 		`;
 
 		execFileSync(
-			process.execPath,
+			testNode,
 			[
 				"--experimental-transform-types",
 				"--import",
@@ -149,7 +150,7 @@ describe("subagent extension child mode", () => {
 			const env = parentToolEnv();
 			env.PI_CODING_AGENT_DIR = agentDir;
 			const output = execFileSync(
-				process.execPath,
+				testNode,
 				[
 					"--experimental-transform-types",
 					"--import",
@@ -192,7 +193,7 @@ describe("subagent extension child mode", () => {
 		`;
 
 		execFileSync(
-			process.execPath,
+			testNode,
 			[
 				"--experimental-transform-types",
 				"--import",
@@ -227,7 +228,7 @@ describe("subagent extension child mode", () => {
 		`;
 
 		execFileSync(
-			process.execPath,
+			testNode,
 			[
 				"--experimental-transform-types",
 				"--import",
@@ -263,7 +264,7 @@ describe("subagent extension child mode", () => {
 		`;
 
 		execFileSync(
-			process.execPath,
+			testNode,
 			[
 				"--experimental-transform-types",
 				"--import",
@@ -308,7 +309,7 @@ describe("subagent extension child mode", () => {
 		`;
 
 		execFileSync(
-			process.execPath,
+			testNode,
 			[
 				"--experimental-transform-types",
 				"--import",
@@ -350,7 +351,7 @@ describe("subagent extension child mode", () => {
 		`;
 
 		execFileSync(
-			process.execPath,
+			testNode,
 			[
 				"--experimental-transform-types",
 				"--import",

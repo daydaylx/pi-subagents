@@ -65,15 +65,19 @@ export function getConfigDirName(): string {
 	return resolveConfigDirName();
 }
 
+export function getHomeDir(): string {
+	return process.env.HOME || process.env.USERPROFILE || os.homedir();
+}
+
 export function getProjectConfigDir(projectRoot: string): string {
 	return path.join(projectRoot, getConfigDirName());
 }
 
 export function getAgentDir(): string {
 	const configured = process.env.PI_CODING_AGENT_DIR;
-	if (configured === "~") return os.homedir();
-	if (configured?.startsWith("~/")) return path.join(os.homedir(), configured.slice(2));
-	return configured || path.join(os.homedir(), getConfigDirName(), "agent");
+	if (configured === "~") return getHomeDir();
+	if (configured?.startsWith("~/")) return path.join(getHomeDir(), configured.slice(2));
+	return configured || path.join(getHomeDir(), getConfigDirName(), "agent");
 }
 
 const statusCache = new Map<string, { mtime: number; status: AsyncStatus }>();

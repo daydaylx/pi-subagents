@@ -97,7 +97,7 @@ function resolveReviewThinking(input: {
 function resolveConfiguredModel(ctx: WatchdogReviewContext, rawModel: string): { model: RegistryModel; modelString: string } {
 	const availableModels = ctx.modelRegistry.getAvailable().map(toModelInfo);
 	const preferredProvider = typeof ctx.model?.provider === "string" ? ctx.model.provider : undefined;
-	const resolved = resolveModelCandidate(rawModel, availableModels, preferredProvider);
+	const resolved = resolveModelCandidate(rawModel, availableModels, preferredProvider) ?? rawModel;
 	const { baseModel } = splitKnownThinkingSuffix(resolved);
 	const named = splitProviderModel(baseModel);
 	if (!named) {

@@ -1273,8 +1273,10 @@ Inspect canonical
 		tempDirs.push(dir, home);
 		const oldHome = process.env.HOME;
 		const oldUserProfile = process.env.USERPROFILE;
+		const oldPiCodingAgentDir = process.env.PI_CODING_AGENT_DIR;
 		process.env.HOME = home;
 		process.env.USERPROFILE = home;
+		delete process.env.PI_CODING_AGENT_DIR;
 		try {
 			const userChainsDir = path.join(home, ".pi", "agent", "chains");
 			fs.mkdirSync(userChainsDir, { recursive: true });
@@ -1313,6 +1315,8 @@ Inspect project
 			else process.env.HOME = oldHome;
 			if (oldUserProfile === undefined) delete process.env.USERPROFILE;
 			else process.env.USERPROFILE = oldUserProfile;
+			if (oldPiCodingAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+			else process.env.PI_CODING_AGENT_DIR = oldPiCodingAgentDir;
 		}
 	});
 });

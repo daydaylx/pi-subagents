@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import type { ModelScopeConfig } from "../runs/shared/model-scope.ts";
 import { resolveTurnBudgetConfig } from "../runs/shared/turn-budget.ts";
 import type { ToolBudgetConfig, TurnBudgetConfig } from "../shared/types.ts";
-import { getAgentDir, getProjectConfigDir } from "../shared/utils.ts";
+import { getAgentDir, getHomeDir, getProjectConfigDir } from "../shared/utils.ts";
 import { parseMemoryFrontmatter } from "./agent-memory.ts";
 import {
   agentFrontmatterFields,
@@ -399,7 +399,7 @@ export function discoverAgents(
   scope: AgentScope,
 ): AgentDiscoveryResult {
   const userDirOld = path.join(getAgentDir(), "agents");
-  const userDirNew = path.join(os.homedir(), ".agents");
+	const userDirNew = path.join(getHomeDir(), ".agents");
   const { readDirs: projectAgentDirs, preferredDir: projectAgentsDir } =
     resolveNearestProjectAgentDirs(cwd);
   const userSettingsPath = getUserAgentSettingsPath();
@@ -504,7 +504,7 @@ export function discoverAgentsAll(cwd: string): {
   projectSettingsPath: string | null;
 } {
   const userDirOld = path.join(getAgentDir(), "agents");
-  const userDirNew = path.join(os.homedir(), ".agents");
+	const userDirNew = path.join(getHomeDir(), ".agents");
   const userChainDir = getUserChainDir();
   const { readDirs: projectDirs, preferredDir: projectDir } =
     resolveNearestProjectAgentDirs(cwd);

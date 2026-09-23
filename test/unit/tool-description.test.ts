@@ -14,6 +14,7 @@ import {
 import { SUBAGENT_CHILD_ENV, SUBAGENT_FANOUT_CHILD_ENV } from "../../src/runs/shared/pi-args.ts";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+const testNode = process.platform === "linux" && fs.existsSync("/usr/bin/node") ? "/usr/bin/node" : process.execPath;
 
 function escapeRegex(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -191,7 +192,7 @@ describe("registered subagent tool description", () => {
 			process.stdout.write(JSON.stringify(registeredTool.description));
 		`;
 		const output = execFileSync(
-			process.execPath,
+			testNode,
 			[
 				"--experimental-transform-types",
 				"--import",

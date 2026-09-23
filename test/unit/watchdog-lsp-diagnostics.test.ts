@@ -11,6 +11,8 @@ import {
 } from "../../src/watchdog/lsp-diagnostics.ts";
 import type { WatchdogLspResult } from "../../src/watchdog/types.ts";
 
+const testNode = process.platform === "linux" && fs.existsSync("/usr/bin/node") ? "/usr/bin/node" : process.execPath;
+
 function result(diagnostics: WatchdogLspResult["diagnostics"]): WatchdogLspResult {
 	return {
 		status: "ok",
@@ -100,10 +102,10 @@ describe("watchdog LSP diagnostics", () => {
 			const scriptPath = path.join(binDir, "tls-malformed.js");
 			fs.writeFileSync(scriptPath, "process.stdout.write('Content-Length: 8\\r\\n\\r\\nnot-json'); setTimeout(() => process.exit(0), 50);\n", "utf-8");
 			if (process.platform === "win32") {
-				fs.writeFileSync(path.join(binDir, "typescript-language-server.cmd"), `@echo off\r\n"${process.execPath}" "%~dp0\\tls-malformed.js" %*\r\n`, "utf-8");
+				fs.writeFileSync(path.join(binDir, "typescript-language-server.cmd"), `@echo off\r\n"${testNode}" "%~dp0\\tls-malformed.js" %*\r\n`, "utf-8");
 			} else {
 				const commandPath = path.join(binDir, "typescript-language-server");
-				fs.writeFileSync(commandPath, `#!/bin/sh\nexec "${process.execPath}" "$(dirname "$0")/tls-malformed.js" "$@"\n`, { encoding: "utf-8", mode: 0o755 });
+				fs.writeFileSync(commandPath, `#!/bin/sh\nexec "${testNode}" "$(dirname "$0")/tls-malformed.js" "$@"\n`, { encoding: "utf-8", mode: 0o755 });
 			}
 
 			const diagnostics = await collectWatchdogLspDiagnostics({

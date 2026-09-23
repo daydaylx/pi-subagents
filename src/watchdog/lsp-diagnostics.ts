@@ -260,6 +260,7 @@ class JsonRpcLspClient {
 	private readonly child: ChildProcessWithoutNullStreams;
 	private stderr = "";
 	private exited = false;
+	private protocolError: Error | undefined;
 	private readonly exitWaiters: Array<() => void> = [];
 
 	constructor(child: ChildProcessWithoutNullStreams) {
@@ -275,8 +276,16 @@ class JsonRpcLspClient {
 		});
 		child.on("exit", (code, signal) => {
 			this.exited = true;
-			this.rejectPending(new Error(`language server exited${code === null ? "" : ` with code ${code}`}${signal ? ` signal ${signal}` : ""}`));
-			this.resolveExitWaiters();
+			// stdout data can be delivered just after the exit notification. Give
+			// a complete buffered frame a final parse opportunity before reporting
+			// the generic process-exit error.
+			this.handleStdout(Buffer.alloc(0));
+			const exitText = `language server exited${code === null ? "" : ` with code ${code}`}${signal ? ` signal ${signal}` : ""}`;
+			const exitError = new Error(code === 0 ? `Invalid LSP JSON-RPC response: ${exitText}` : exitText);
+			setImmediate(() => {
+				if (!this.protocolError) this.rejectPending(exitError);
+				this.resolveExitWaiters();
+			});
 		});
 	}
 
@@ -365,9 +374,9 @@ class JsonRpcLspClient {
 	}
 
 	private failProtocol(error: Error): void {
-		if (this.exited) return;
+		this.protocolError = error;
 		this.rejectPending(error);
-		this.child.kill("SIGTERM");
+		if (!this.exited) this.child.kill("SIGTERM");
 	}
 
 	private waitForExit(timeoutMs: number): Promise<void> {

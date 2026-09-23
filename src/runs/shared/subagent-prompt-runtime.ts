@@ -336,13 +336,17 @@ export default function registerSubagentPromptRuntime(pi: ExtensionAPI): void {
 		});
 	}
 
-	onRuntimeEvent("context", (event: { messages: unknown[] }) => {
+	onRuntimeEvent("context", (rawEvent) => {
+		if (!rawEvent || typeof rawEvent !== "object" || !Array.isArray((rawEvent as { messages?: unknown }).messages)) return undefined;
+		const event = rawEvent as { messages: unknown[] };
 		const messages = stripParentOnlySubagentMessages(event.messages);
 		if (messages === event.messages) return undefined;
 		return { messages };
 	});
 
-	onRuntimeEvent("before_agent_start", async (event: { systemPrompt: string }) => {
+	onRuntimeEvent("before_agent_start", async (rawEvent) => {
+		if (!rawEvent || typeof rawEvent !== "object" || typeof (rawEvent as { systemPrompt?: unknown }).systemPrompt !== "string") return undefined;
+		const event = rawEvent as { systemPrompt: string };
 		registerNativeSupervisorFallbackOnce();
 		const intercomSessionName = process.env[SUBAGENT_INTERCOM_SESSION_NAME_ENV]?.trim();
 		if (intercomSessionName && typeof pi.setSessionName === "function") {

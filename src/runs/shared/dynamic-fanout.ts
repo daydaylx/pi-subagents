@@ -262,9 +262,9 @@ export function materializeDynamicParallelStep(step: DynamicParallelStep, output
 }
 
 export function collectDynamicResults(
-	step: DynamicParallelStep,
+	step: Pick<DynamicParallelStep, "expand" | "parallel" | "collect"> & { parallel: { agent: string } },
 	items: DynamicMaterializedItem[],
-	results: Array<Pick<SingleResult, "agent" | "exitCode" | "error" | "timedOut" | "stopped" | "structuredOutput" | "artifactPaths" | "savedOutputPath"> & { output?: string; finalOutput?: string }>,
+	results: Array<Omit<Pick<SingleResult, "agent" | "exitCode" | "error" | "timedOut" | "stopped" | "structuredOutput" | "artifactPaths" | "savedOutputPath">, "exitCode"> & { exitCode: number | null; output?: string; finalOutput?: string }>,
 ): DynamicCollectedResult[] {
 	return items.map((entry, index) => {
 		const result = results[index];

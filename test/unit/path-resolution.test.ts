@@ -9,25 +9,26 @@ import { resolveSkillPath, clearSkillCache } from "../../src/agents/skills.ts";
 const tmpDir = path.join(os.tmpdir(), "pi-path-resolution-test");
 const cwdDir = path.join(tmpDir, "cwd");
 
-const realHomeDir = os.homedir();
+const realHomeDir = path.join(tmpDir, "home");
 const realUserAgentsDir = path.join(realHomeDir, ".agents");
-const userAgentsDirBackup = path.join(tmpDir, ".agents_backup");
+const previousHome = process.env.HOME;
+const previousUserProfile = process.env.USERPROFILE;
+const previousPiCodingAgentDir = process.env.PI_CODING_AGENT_DIR;
 
 before(() => {
 	fs.mkdirSync(cwdDir, { recursive: true });
-
-	if (fs.existsSync(realUserAgentsDir)) {
-		fs.cpSync(realUserAgentsDir, userAgentsDirBackup, { recursive: true });
-	}
+	process.env.HOME = realHomeDir;
+	process.env.USERPROFILE = realHomeDir;
+	delete process.env.PI_CODING_AGENT_DIR;
 });
 
 after(() => {
-	if (fs.existsSync(userAgentsDirBackup)) {
-		fs.rmSync(realUserAgentsDir, { recursive: true, force: true });
-		fs.cpSync(userAgentsDirBackup, realUserAgentsDir, { recursive: true });
-	} else {
-		fs.rmSync(realUserAgentsDir, { recursive: true, force: true });
-	}
+	if (previousHome === undefined) delete process.env.HOME;
+	else process.env.HOME = previousHome;
+	if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+	else process.env.USERPROFILE = previousUserProfile;
+	if (previousPiCodingAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+	else process.env.PI_CODING_AGENT_DIR = previousPiCodingAgentDir;
 	fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 

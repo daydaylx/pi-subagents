@@ -6,7 +6,7 @@ import { execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { getAgentDir, getProjectConfigDir } from "../shared/utils.ts";
+import { getAgentDir, getHomeDir, getProjectConfigDir } from "../shared/utils.ts";
 import { findNearestProjectRoot } from "./agent-override-store.ts";
 
 interface PackageSubagentPaths {
@@ -126,9 +126,9 @@ function resolveSettingsPackageRoot(
       : undefined;
   }
   const normalized = trimmed.startsWith("file:") ? trimmed.slice(5) : trimmed;
-  if (normalized === "~") return os.homedir();
+  if (normalized === "~") return getHomeDir();
   if (normalized.startsWith("~/"))
-    return path.join(os.homedir(), normalized.slice(2));
+    return path.join(getHomeDir(), normalized.slice(2));
   if (path.isAbsolute(normalized)) return normalized;
   if (
     normalized === "." ||

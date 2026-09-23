@@ -19,6 +19,7 @@ import {
 let homeDir = "";
 const previousHome = process.env.HOME;
 const previousUserProfile = process.env.USERPROFILE;
+const previousPiCodingAgentDir = process.env.PI_CODING_AGENT_DIR;
 
 function makeCtx(cwd: string, models: Array<Record<string, unknown>>) {
 	return {
@@ -34,6 +35,7 @@ describe("profiles helpers", () => {
 		homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-subprofiles-home-"));
 		process.env.HOME = homeDir;
 		process.env.USERPROFILE = homeDir;
+		delete process.env.PI_CODING_AGENT_DIR;
 	});
 
 	afterEach(() => {
@@ -41,6 +43,8 @@ describe("profiles helpers", () => {
 		else process.env.HOME = previousHome;
 		if (previousUserProfile === undefined) delete process.env.USERPROFILE;
 		else process.env.USERPROFILE = previousUserProfile;
+		if (previousPiCodingAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousPiCodingAgentDir;
 		fs.rmSync(homeDir, { recursive: true, force: true });
 	});
 

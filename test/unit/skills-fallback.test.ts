@@ -13,6 +13,7 @@ import {
 } from "../../src/agents/skills.ts";
 
 let tempDir = "";
+const previousPiCodingAgentDir = process.env.PI_CODING_AGENT_DIR;
 
 function writeSkillFile(skillDir: string, body: string, description = "Test description"): void {
 	fs.mkdirSync(skillDir, { recursive: true });
@@ -54,12 +55,15 @@ async function importSkillsFresh() {
 describe("skills filesystem fallback", () => {
 	beforeEach(() => {
 		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-skills-fallback-"));
+		delete process.env.PI_CODING_AGENT_DIR;
 		clearSkillCache();
 	});
 
 	afterEach(() => {
 		clearSkillCache();
 		fs.rmSync(tempDir, { recursive: true, force: true });
+		if (previousPiCodingAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousPiCodingAgentDir;
 	});
 
 	it("discovers project skills from filesystem paths", () => {
