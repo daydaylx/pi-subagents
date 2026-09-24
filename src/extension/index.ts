@@ -620,6 +620,7 @@ wait also returns when a run needs attention (a child that went idle or blocked 
 		state.baseCwd = ctx.cwd;
 		state.currentSessionId = resolveCurrentSessionId(ctx.sessionManager);
 		state.subagentSpawns = { sessionId: state.currentSessionId, count: 0 };
+		state.temporaryAgentCount = { count: 0, reservedRuntimeMs: 0 };
 		// Set PI_SUBAGENT_PARENT_SESSION for permission-system forwarding.
 		// Only set in the root session (the interactive UI session), not in
 		// child subagent processes — children inherit the parent's value

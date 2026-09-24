@@ -2,6 +2,7 @@
  * Display items, error-handling types, and the runSync execution-options surface.
  */
 
+import type { TemporaryAgentsConfig } from "../../agents/temporary-spec.ts";
 import type { WidgetPlacement } from "@earendil-works/pi-coding-agent";
 import type { ModelScopeConfig } from "../../runs/shared/model-scope.ts";
 import type { AgentConfig } from "../../agents/agents.ts";
@@ -182,6 +183,7 @@ export interface ExtensionConfig {
   singleRunOutputBaseDir?: string;
   maxSubagentDepth?: number;
   maxSubagentSpawnsPerSession?: number;
+  temporaryAgents?: TemporaryAgentsConfig;
   /** Global cap on simultaneously-running subagent tasks within a single run. Defaults to 20. */
   globalConcurrencyLimit?: number;
   control?: ControlConfig;

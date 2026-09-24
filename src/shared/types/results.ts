@@ -2,6 +2,7 @@
  * Result and acceptance types: per-agent run results, acceptance ledger, artifacts.
  */
 
+import type { TemporaryAgentMeta } from "../../agents/temporary-spec.ts";
 import type { Message } from "@earendil-works/pi-ai";
 import type {
   Usage,
@@ -245,6 +246,7 @@ export interface SingleResult {
 
 export interface Details {
   mode: SubagentRunMode | "management";
+  temporaryAgent?: TemporaryAgentMeta;
   runId?: string;
   context?: "fresh" | "fork";
   results: SingleResult[];

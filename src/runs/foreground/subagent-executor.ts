@@ -1,4 +1,18 @@
 import { randomUUID } from "node:crypto";
+import {
+	buildTemporaryAgentConfig,
+	renderTemporaryTask,
+	resolveEffectivePolicy,
+	resolveTemporaryLimits,
+	resolveTemporaryModel,
+	TEMPORARY_AGENT_FILE_PATH,
+	temporaryAgentName,
+	temporaryAgentStatus,
+	validateTemporarySpec,
+	type TemporaryAgentMeta,
+	type TemporaryAgentSpec,
+	type TemporaryAgentStatus,
+} from "../../agents/temporary-spec.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
@@ -136,6 +150,7 @@ export interface SubagentParamsLike {
 	view?: "fleet" | "transcript";
 	lines?: number;
 	agent?: string;
+	spec?: unknown;
 	task?: string;
 	message?: string;
 	chain?: ChainStep[];
@@ -269,6 +284,116 @@ function trustedSessionRootsForStatus(ctx: ExtensionContext, deps: ExecutorDeps)
 	const parentSessionFile = ctx.sessionManager.getSessionFile() ?? null;
 	if (parentSessionFile) roots.push(deps.getSubagentSessionRoot(parentSessionFile));
 	return [...new Set(roots)];
+}
+
+/** Visible-delegation metadata per tool call, attached to the result by the executor wrapper. */
+const temporaryMetaByCall = new Map<string, TemporaryAgentMeta>();
+
+function resolveTemporarySpecLaunch(
+	callId: string,
+	params: SubagentParamsLike,
+	state: SubagentState,
+	config: ExtensionConfig,
+): { params: SubagentParamsLike; agent: AgentConfig } | { error: AgentToolResult<Details> } {
+	const blocked = (text: string, spec?: TemporaryAgentSpec) => {
+		if (spec) {
+			temporaryMetaByCall.set(callId, {
+				name: "temp-blocked",
+				objective: spec.objective,
+				delegationReason: spec.delegationReason,
+				profile: spec.profile,
+				...(spec.scope ? { scope: spec.scope } : {}),
+				model: undefined,
+				modelSource: "default",
+				write: false,
+				effective: [],
+				denied: spec.requestedCapabilities ?? [],
+				budgets: { runtimeMs: 0, toolCalls: 0, turns: 0, tokenBudget: 0, tokenBudgetEnforced: false },
+				status: "policy_blocked",
+			});
+		}
+		return {
+			error: { content: [{ type: "text" as const, text }], isError: true, details: { mode: "single" as const, results: [] } } as AgentToolResult<Details>,
+		};
+	};
+	if (params.agent || params.task || (params.chain?.length ?? 0) > 0 || (params.tasks?.length ?? 0) > 0) {
+		return blocked("spec cannot be combined with agent, task, chain or tasks.");
+	}
+	if (params.context === "fork") {
+		return blocked("Temporary agents are stateless and start with fresh context; context 'fork' is not allowed with spec.");
+	}
+	const validation = validateTemporarySpec(params.spec);
+	if (!validation.ok) return blocked(`Invalid temporary agent spec: ${validation.errors.join(" ")}`);
+	const spec = validation.spec;
+	const limits = resolveTemporaryLimits(config.temporaryAgents);
+	const used = state.temporaryAgentCount?.count ?? 0;
+	const reserved = state.temporaryAgentCount?.reservedRuntimeMs ?? 0;
+	if (used >= limits.maxPerRun) {
+		return blocked(`Temporary agent limit reached (${used}/${limits.maxPerRun}). Complete the work directly.`, spec);
+	}
+	const policy = resolveEffectivePolicy(spec);
+	if (policy.tools.length === 0) {
+		return blocked(`Policy blocked: profile '${spec.profile}' grants no tools for the requested capabilities (denied: ${policy.denied.join(", ") || "none"}). Only the main agent may write.`, spec);
+	}
+	// The caller can only shorten the per-agent runtime, never exceed the runtime cap.
+	const runtimeMs = Math.min(params.timeoutMs ?? params.maxRuntimeMs ?? limits.perAgentRuntimeMs, limits.perAgentRuntimeMs);
+	if (reserved + runtimeMs > limits.totalRuntimeMs) {
+		return blocked(`Total temporary agent runtime budget exhausted (${reserved}/${limits.totalRuntimeMs} ms reserved, ${runtimeMs} ms requested). Complete the work directly.`, spec);
+	}
+	state.temporaryAgentCount = { count: used + 1, reservedRuntimeMs: reserved + runtimeMs };
+	const name = temporaryAgentName(used + 1);
+	const model = resolveTemporaryModel(spec.modelPreference, config.temporaryAgents);
+	temporaryMetaByCall.set(callId, {
+		name,
+		objective: spec.objective,
+		delegationReason: spec.delegationReason,
+		profile: spec.profile,
+		...(spec.scope ? { scope: spec.scope } : {}),
+		model: model.model,
+		modelSource: model.source,
+		write: false,
+		effective: policy.effective,
+		denied: policy.denied,
+		budgets: { runtimeMs, toolCalls: limits.perAgentToolCalls, turns: limits.perAgentTurns, tokenBudget: limits.perAgentTokenBudget, tokenBudgetEnforced: false },
+		status: "running",
+	});
+	return {
+		params: {
+			...params,
+			agent: name,
+			task: renderTemporaryTask(spec, policy),
+			context: "fresh",
+			timeoutMs: runtimeMs,
+			maxRuntimeMs: undefined,
+			// After the hard limit the child is blocked from tools so it can only finalize.
+			toolBudget: { soft: Math.max(1, Math.floor(limits.perAgentToolCalls * 0.8)), hard: limits.perAgentToolCalls, block: "*" },
+			turnBudget: { maxTurns: limits.perAgentTurns, graceTurns: 2 },
+			artifacts: params.artifacts,
+		},
+		agent: buildTemporaryAgentConfig(name, spec, policy, model.model),
+	};
+}
+
+function withTemporaryMeta(
+	execute: (id: string, params: SubagentParamsLike, signal: AbortSignal, onUpdate: ((r: AgentToolResult<Details>) => void) | undefined, ctx: ExtensionContext) => Promise<AgentToolResult<Details>>,
+) {
+	return async (id: string, params: SubagentParamsLike, signal: AbortSignal, onUpdate: ((r: AgentToolResult<Details>) => void) | undefined, ctx: ExtensionContext): Promise<AgentToolResult<Details>> => {
+		if (params.spec === undefined) return execute(id, params, signal, onUpdate, ctx);
+		try {
+			const result = await execute(id, params, signal, onUpdate, ctx);
+			const meta = temporaryMetaByCall.get(id);
+			if (!meta || !result.details) return result;
+			const details = result.details as Details;
+			const status: TemporaryAgentStatus = meta.status === "policy_blocked"
+				? "policy_blocked"
+				: details.asyncId
+					? "running"
+					: temporaryAgentStatus({ timedOut: details.timedOut, stopped: details.stopped, failed: result.isError === true });
+			return { ...result, details: { ...details, temporaryAgent: { ...meta, status } } };
+		} finally {
+			temporaryMetaByCall.delete(id);
+		}
+	};
 }
 
 function reserveSubagentSpawns(input: { state: SubagentState; config: ExtensionConfig; sessionId: string | null; requested: number; mode: "single" | "parallel" | "chain" }): AgentToolResult<Details> | undefined {
@@ -3453,8 +3578,14 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 		const parentSessionFile = ctx.sessionManager.getSessionFile() ?? null;
 		deps.state.currentSessionId = resolveCurrentSessionId(ctx.sessionManager);
 		const discovered = deps.discoverAgents(effectiveCwd, scope);
-		const discoveredAgents = discovered.agents;
+		let discoveredAgents = discovered.agents;
 		const modelScope = discovered.modelScope;
+		if (effectiveParams.spec !== undefined) {
+			const temporary = resolveTemporarySpecLaunch(_id, effectiveParams, deps.state, deps.config);
+			if ("error" in temporary) return temporary.error;
+			effectiveParams = temporary.params;
+			discoveredAgents = [...discoveredAgents, temporary.agent];
+		}
 		effectiveParams = applySingleAgentLaunchDefaults(effectiveParams, discoveredAgents);
 		const foregroundTimeout = resolveForegroundTimeout(effectiveParams);
 		if (foregroundTimeout.error) return buildRequestedModeError(effectiveParams, foregroundTimeout.error);
@@ -3469,7 +3600,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 			orchestratorTarget: sessionName,
 		});
 		const agents = intercomBridge.active
-			? discoveredAgents.map((agent) => applyIntercomBridgeToAgent(agent, intercomBridge))
+			? discoveredAgents.map((agent) => (agent.filePath === TEMPORARY_AGENT_FILE_PATH ? agent : applyIntercomBridgeToAgent(agent, intercomBridge)))
 			: discoveredAgents;
 		const runId = randomUUID().slice(0, 8);
 		const inheritedNestedRoute = resolveInheritedNestedRouteFromEnv();
@@ -3733,5 +3864,5 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 		}
 	};
 
-	return { execute: executeWithSingleDispatchGuard };
+	return { execute: withTemporaryMeta(executeWithSingleDispatchGuard) };
 }

@@ -312,6 +312,11 @@ export const HARNESS_MANAGEMENT_ACTIONS = ["list", "status", "stop", "interrupt"
 
 const HarnessSubagentParamsSchema = Type.Object({
 	agent: Type.Optional(Type.String({ description: "Agent name (SINGLE mode)" })),
+	spec: Type.Optional(Type.Unsafe({
+		type: "object",
+		additionalProperties: true,
+		description: "Temporary task agent contract (instead of agent): {objective, profile: analyse|research|verify|implement, delegationReason, context?, scope?, expectedOutput?, requestedCapabilities?, modelPreference?, constraints?}. The runtime decides effective permissions; requested capabilities can only narrow them.",
+	})),
 	task: Type.Optional(Type.String({ description: "Task (SINGLE mode, optional for self-contained agents)" })),
 	action: Type.Optional(Type.String({
 		enum: [...HARNESS_MANAGEMENT_ACTIONS],

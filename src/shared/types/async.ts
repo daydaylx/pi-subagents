@@ -345,6 +345,7 @@ export interface SubagentState {
   currentSessionId: string | null;
   subagentInProgress?: boolean;
   subagentSpawns?: { sessionId: string | null; count: number };
+  temporaryAgentCount?: { count: number; reservedRuntimeMs: number };
   asyncJobs: Map<string, AsyncJobState>;
   foregroundRuns?: Map<string, ForegroundResumeRun>;
   foregroundControls: Map<string, ForegroundControlState>;
