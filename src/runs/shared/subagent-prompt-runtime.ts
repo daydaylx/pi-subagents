@@ -5,7 +5,7 @@ import { registerNativeSupervisorClient } from "../../intercom/native-supervisor
 import { consumeSteerRequestsFromDir, writeSteerRequestToDir, type SteerRequest } from "../background/control-channel.ts";
 import { SUBAGENT_FANOUT_CHILD_ENV, SUBAGENT_STEER_INBOX_ENV } from "./pi-args.ts";
 import { STRUCTURED_OUTPUT_CAPTURE_ENV, STRUCTURED_OUTPUT_SCHEMA_ENV, validateStructuredOutputValue } from "./structured-output.ts";
-import { TOOL_BUDGET_ENV, decodeToolBudgetEnv, shouldBlockToolForBudget, toolBudgetBlockedMessage, toolBudgetSoftNudge } from "./tool-budget.ts";
+import { TOOL_BUDGET_ENV, decodeToolBudgetEnv, shouldBlockToolForBudget, tokenBudgetBlockedMessage, tokensFromUsage, toolBudgetBlockedMessage, toolBudgetSoftNudge } from "./tool-budget.ts";
 import { TIME_BUDGET_ENV, decodeTimeBudgetEnv, shouldNudgeForTimeBudget, timeBudgetSoftNudge } from "./time-budget.ts";
 import type { JsonSchemaObject, ResolvedToolBudget } from "../../shared/types.ts";
 import { registerChildWatchdog } from "../../watchdog/register-child.ts";
@@ -176,9 +176,29 @@ function registerToolBudget(pi: ExtensionAPI, budget: ResolvedToolBudget | undef
 	let toolCount = 0;
 	let softNudged = false;
 	const sendUserMessage = (pi as { sendUserMessage?: (content: string, options: { deliverAs: "steer" }) => unknown }).sendUserMessage;
-	const onRuntimeEvent = pi.on as unknown as (event: string, handler: (event: { toolName?: string }) => unknown) => void;
+	const onRuntimeEvent = pi.on as unknown as (event: string, handler: (event: { toolName?: string; message?: { role?: string; usage?: { input?: number; output?: number } } }) => unknown) => void;
+	let tokensUsed = 0;
+	let tokenNudged = false;
+	if (budget.tokens !== undefined) {
+		onRuntimeEvent("message_end", (event) => {
+			if (event.message?.role !== "assistant") return undefined;
+			tokensUsed += tokensFromUsage(event.message.usage);
+			if (tokensUsed >= (budget.tokens ?? Infinity) && !tokenNudged) {
+				tokenNudged = true;
+				try {
+					sendUserMessage?.(`Token budget reached (${tokensUsed}/${budget.tokens} tokens). Stop new work and finalize from the context you already have.`, { deliverAs: "steer" });
+				} catch {
+					// The tool block below stays authoritative.
+				}
+			}
+			return undefined;
+		});
+	}
 	onRuntimeEvent("tool_call", (event) => {
 		const toolName = typeof event.toolName === "string" ? event.toolName : "tool";
+		if (budget.tokens !== undefined && tokensUsed >= budget.tokens) {
+			return { block: true, reason: tokenBudgetBlockedMessage(budget, toolName, tokensUsed) };
+		}
 		toolCount++;
 		if (budget.soft !== undefined && toolCount >= budget.soft && !softNudged) {
 			softNudged = true;

@@ -48,7 +48,7 @@ export interface TemporaryAgentsConfig {
   perAgentRuntimeMs?: number;
   perAgentToolCalls?: number;
   perAgentTurns?: number;
-  /** Declared and reported, but NOT yet enforced: the runtime has no hard token cap. */
+  /** Cumulative assistant input + output tokens; enforced in the child (all tools blocked once reached). */
   perAgentTokenBudget?: number;
   totalRuntimeMs?: number;
   modelClasses?: Partial<Record<ModelClass, string>>;
@@ -59,7 +59,7 @@ export const TEMPORARY_AGENT_DEFAULTS = {
   perAgentRuntimeMs: 600_000,
   perAgentToolCalls: 60,
   perAgentTurns: 30,
-  perAgentTokenBudget: 200_000,
+  perAgentTokenBudget: 500_000,
   totalRuntimeMs: 1_800_000,
 } as const;
 
@@ -164,7 +164,7 @@ export interface TemporaryAgentMeta {
     toolCalls: number;
     turns: number;
     tokenBudget: number;
-    tokenBudgetEnforced: false;
+    tokenBudgetEnforced: true;
   };
   status: TemporaryAgentStatus;
 }

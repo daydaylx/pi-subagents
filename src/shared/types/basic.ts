@@ -106,12 +106,18 @@ export interface ToolBudgetConfig {
   soft?: number;
   hard: number;
   block?: string[] | "*";
+  /**
+   * Cumulative token cap (assistant input + output over all turns). Once
+   * reached, every tool is blocked so the child can only finalize.
+   */
+  tokens?: number;
 }
 
 export interface ResolvedToolBudget {
   soft?: number;
   hard: number;
   block: string[] | "*";
+  tokens?: number;
 }
 
 export type ToolBudgetOutcome =

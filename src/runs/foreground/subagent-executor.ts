@@ -308,7 +308,7 @@ function resolveTemporarySpecLaunch(
 				write: false,
 				effective: [],
 				denied: spec.requestedCapabilities ?? [],
-				budgets: { runtimeMs: 0, toolCalls: 0, turns: 0, tokenBudget: 0, tokenBudgetEnforced: false },
+				budgets: { runtimeMs: 0, toolCalls: 0, turns: 0, tokenBudget: 0, tokenBudgetEnforced: true },
 				status: "policy_blocked",
 			});
 		}
@@ -360,7 +360,7 @@ function resolveTemporarySpecLaunch(
 		write: false,
 		effective: policy.effective,
 		denied: policy.denied,
-		budgets: { runtimeMs, toolCalls: limits.perAgentToolCalls, turns: limits.perAgentTurns, tokenBudget: limits.perAgentTokenBudget, tokenBudgetEnforced: false },
+		budgets: { runtimeMs, toolCalls: limits.perAgentToolCalls, turns: limits.perAgentTurns, tokenBudget: limits.perAgentTokenBudget, tokenBudgetEnforced: true },
 		status: "running",
 	});
 	return {
@@ -372,7 +372,7 @@ function resolveTemporarySpecLaunch(
 			timeoutMs: runtimeMs,
 			maxRuntimeMs: undefined,
 			// After the hard limit the child is blocked from tools so it can only finalize.
-			toolBudget: { soft: Math.max(1, Math.floor(limits.perAgentToolCalls * 0.8)), hard: limits.perAgentToolCalls, block: "*" },
+			toolBudget: { soft: Math.max(1, Math.floor(limits.perAgentToolCalls * 0.8)), hard: limits.perAgentToolCalls, block: "*", tokens: limits.perAgentTokenBudget },
 			turnBudget: { maxTurns: limits.perAgentTurns, graceTurns: 2 },
 			artifacts: params.artifacts,
 		},

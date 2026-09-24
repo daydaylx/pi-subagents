@@ -29,7 +29,10 @@ export function validateToolBudgetConfig(raw: unknown, label = "toolBudget"): { 
 			if (typeof item !== "string" || !item.trim()) return { error: `${label}.block must contain non-empty tool names.` };
 		}
 	}
-	return { budget: { hard: value.hard, ...(value.soft !== undefined ? { soft: value.soft } : {}), block: normalizeToolBudgetBlock(value.block) } };
+	if (value.tokens !== undefined && (typeof value.tokens !== "number" || !Number.isInteger(value.tokens) || value.tokens < 1)) {
+		return { error: `${label}.tokens must be an integer >= 1 when provided.` };
+	}
+	return { budget: { hard: value.hard, ...(value.soft !== undefined ? { soft: value.soft } : {}), block: normalizeToolBudgetBlock(value.block), ...(value.tokens !== undefined ? { tokens: value.tokens } : {}) } };
 }
 
 export function initialToolBudgetState(budget: ResolvedToolBudget): ToolBudgetState {
@@ -51,6 +54,15 @@ export function toolBudgetState(budget: ResolvedToolBudget, toolCount: number, b
 export function shouldBlockToolForBudget(budget: ResolvedToolBudget, toolName: string, nextToolCount: number): boolean {
 	if (nextToolCount <= budget.hard) return false;
 	return budget.block === "*" || budget.block.includes(toolName);
+}
+
+/** Assistant usage that counts against the token cap: input + output, like the parent's progress.tokens. */
+export function tokensFromUsage(usage: { input?: number; output?: number } | undefined): number {
+	return (usage?.input ?? 0) + (usage?.output ?? 0);
+}
+
+export function tokenBudgetBlockedMessage(budget: ResolvedToolBudget, toolName: string, used: number): string {
+	return `Token budget reached (${used}/${budget.tokens} tokens). The '${toolName}' tool is blocked; finalize from the context you already have and report what remains uncertain.`;
 }
 
 export function toolBudgetSoftNudge(budget: ResolvedToolBudget, toolCount: number): string {
