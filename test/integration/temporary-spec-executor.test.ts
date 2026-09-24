@@ -86,6 +86,15 @@ describe("temporary agent spec executor policy", { skip: !createSubagentExecutor
 		assert.equal(meta.delegationReason, "independent analysis");
 	});
 
+	it("blocks a direct verify spec (must go through the host verifier chain)", async () => {
+		const state = {};
+		const result = await run({ spec: { ...spec, profile: "verify" } }, state);
+		assert.equal(result.isError, true);
+		assert.match(result.content[0].text, /verifier chain/);
+		assert.equal(result.details.temporaryAgent.status, "policy_blocked");
+		assert.equal((state as any).temporaryAgentCount, undefined);
+	});
+
 	it("rejects the agent beyond the per-run limit with no side effect", async () => {
 		const state = { temporaryAgentCount: { count: 5, reservedRuntimeMs: 0 } };
 		const result = await run({ spec }, state);

@@ -325,6 +325,12 @@ function resolveTemporarySpecLaunch(
 	const validation = validateTemporarySpec(params.spec);
 	if (!validation.ok) return blocked(`Invalid temporary agent spec: ${validation.errors.join(" ")}`);
 	const spec = validation.spec;
+	if (spec.profile === "verify") {
+		// Verification runs through the host's verifier chain (ticket, dedup, commit gate),
+		// which translates a verify spec into the checked verifier call before it gets here.
+		// A verify spec that still reaches the executor (e.g. via RPC) has bypassed that chain.
+		return blocked("Policy blocked: profile 'verify' is only available through the host's verifier chain, not as a direct temporary agent.", spec);
+	}
 	const limits = resolveTemporaryLimits(config.temporaryAgents);
 	const used = state.temporaryAgentCount?.count ?? 0;
 	const reserved = state.temporaryAgentCount?.reservedRuntimeMs ?? 0;

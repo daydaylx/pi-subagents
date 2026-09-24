@@ -216,6 +216,11 @@ const ControlOverrides = Type.Object({
 
 const SubagentParamsSchema = Type.Object({
 	agent: Type.Optional(Type.String({ description: "Agent name (SINGLE mode) or target for management get/update/delete" })),
+	spec: Type.Optional(Type.Unsafe({
+		type: "object",
+		additionalProperties: true,
+		description: "Temporary task agent contract (instead of agent); see the harness schema for fields.",
+	})),
 	task: Type.Optional(Type.String({ description: "Task (SINGLE mode, optional for self-contained agents)" })),
 	// Management action (when present, tool operates in management mode)
 	action: Type.Optional(Type.String({
