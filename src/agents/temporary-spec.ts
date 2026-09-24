@@ -125,6 +125,41 @@ export interface TemporaryAgentResult {
   recommendation?: string;
 }
 
+/**
+ * Deterministic check of the evidence format (rules 6/7): the child must
+ * separate observations, conclusions, assumptions and uncertainty, and must not
+ * present confidence percentages. It reports; it never rewrites or fails a run.
+ */
+export interface EvidenceCheck {
+  complete: boolean;
+  missingSections: string[];
+  confidencePercentages: boolean;
+}
+
+const EVIDENCE_SECTIONS: ReadonlyArray<{ name: string; pattern: RegExp }> = [
+  { name: "summary", pattern: /^\s{0,3}(?:#{1,6}\s*|\*\*)summary\b/im },
+  { name: "findings", pattern: /^\s{0,3}(?:#{1,6}\s*|\*\*)findings\b/im },
+  { name: "open assumptions", pattern: /^\s{0,3}(?:#{1,6}\s*|\*\*)open assumptions\b/im },
+  { name: "remaining uncertainty", pattern: /^\s{0,3}(?:#{1,6}\s*|\*\*)remaining uncertainty\b/im },
+];
+const CONFIDENCE_PERCENT =
+  /\b(?:confidence|konfidenz|sicherheit)\b[^\n%]{0,20}\d{1,3}\s?%|\b\d{1,3}\s?%\s*(?:confidence|confident|konfidenz|sicher)/i;
+
+export function checkEvidenceFormat(text: string): EvidenceCheck {
+  const missingSections = EVIDENCE_SECTIONS.filter((section) => !section.pattern.test(text)).map((section) => section.name);
+  const confidencePercentages = CONFIDENCE_PERCENT.test(text);
+  return { complete: missingSections.length === 0 && !confidencePercentages, missingSections, confidencePercentages };
+}
+
+/** One-line note appended to an incomplete result so the main agent weighs it accordingly. */
+export function evidenceNote(check: EvidenceCheck): string | undefined {
+  if (check.complete) return undefined;
+  const parts: string[] = [];
+  if (check.missingSections.length > 0) parts.push(`fehlende Abschnitte: ${check.missingSections.join(", ")}`);
+  if (check.confidencePercentages) parts.push("enthält Confidence-Prozentwerte, die nicht als Beleg zählen");
+  return `[Evidenzformat unvollständig (${parts.join("; ")}). Befunde ohne Quelle nicht ungeprüft übernehmen.]`;
+}
+
 /** Run status vocabulary shown to the main agent and in telemetry. */
 export type TemporaryAgentStatus =
   | "running"
@@ -167,6 +202,8 @@ export interface TemporaryAgentMeta {
     tokenBudgetEnforced: true;
   };
   status: TemporaryAgentStatus;
+  /** Set for completed foreground runs only; async results are not available at return time. */
+  evidence?: EvidenceCheck;
 }
 
 export interface TemporaryAgentSpec {

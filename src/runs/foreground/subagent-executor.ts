@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import {
 	buildTemporaryAgentConfig,
+	checkEvidenceFormat,
+	evidenceNote,
 	renderTemporaryTask,
 	resolveEffectivePolicy,
 	resolveTemporaryLimits,
@@ -9,6 +11,7 @@ import {
 	temporaryAgentName,
 	temporaryAgentStatus,
 	validateTemporarySpec,
+	type EvidenceCheck,
 	type TemporaryAgentMeta,
 	type TemporaryAgentSpec,
 	type TemporaryAgentStatus,
@@ -395,7 +398,15 @@ function withTemporaryMeta(
 				: details.asyncId
 					? "running"
 					: temporaryAgentStatus({ timedOut: details.timedOut, stopped: details.stopped, failed: result.isError === true });
-			return { ...result, details: { ...details, temporaryAgent: { ...meta, status } } };
+			let content = result.content;
+			let evidence: EvidenceCheck | undefined;
+			if (status === "completed") {
+				const text = result.content.map((part) => (part.type === "text" ? part.text : "")).join("\n");
+				evidence = checkEvidenceFormat(text);
+				const note = evidenceNote(evidence);
+				if (note) content = [...result.content, { type: "text" as const, text: note }];
+			}
+			return { ...result, content, details: { ...details, temporaryAgent: { ...meta, status, ...(evidence ? { evidence } : {}) } } };
 		} finally {
 			temporaryMetaByCall.delete(id);
 		}

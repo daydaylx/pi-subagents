@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
 	buildTemporaryAgentConfig,
+	checkEvidenceFormat,
+	evidenceNote,
 	renderTemporaryTask,
 	resolveEffectivePolicy,
 	resolveTemporaryLimits,
@@ -145,5 +147,44 @@ describe("evidence-based result contract (rules 6, 7)", () => {
 		assert.match(text, /open assumptions/);
 		assert.match(text, /remaining uncertainty/);
 		assert.match(text, /Cite the source/);
+	});
+});
+
+describe("evidence format check (rules 6, 7)", () => {
+	const good = [
+		"### summary\n`math.ts` exports `add`.",
+		"### findings\n- **observation** — `math.ts:1` declares add.\n- **conclusion** — one named export.",
+		"### open assumptions\nnone",
+		"### remaining uncertainty\nnone",
+	].join("\n\n");
+
+	it("accepts the four-section result format", () => {
+		const check = checkEvidenceFormat(good);
+		assert.deepEqual(check, { complete: true, missingSections: [], confidencePercentages: false });
+		assert.equal(evidenceNote(check), undefined);
+	});
+	it("accepts bold headings", () => {
+		assert.equal(checkEvidenceFormat(good.replaceAll("### ", "**").replace(/\*\*(summary|findings|open assumptions|remaining uncertainty)/g, "**$1**")).complete, true);
+	});
+	it("reports missing sections", () => {
+		const check = checkEvidenceFormat("### summary\nx\n### findings\n- y");
+		assert.equal(check.complete, false);
+		assert.deepEqual(check.missingSections, ["open assumptions", "remaining uncertainty"]);
+		assert.match(evidenceNote(check) ?? "", /fehlende Abschnitte: open assumptions, remaining uncertainty/);
+	});
+	it("flags confidence percentages, not other percentages", () => {
+		for (const text of ["Confidence: 92%", "confidence 92 %", "92% confident", "Konfidenz: 80%", "Sicherheit ca. 90%"]) {
+			assert.equal(checkEvidenceFormat(`${good}\n${text}`).confidencePercentages, true, text);
+		}
+		for (const text of ["coverage is 92%", "CPU 40% busy", "the confidence interval"]) {
+			assert.equal(checkEvidenceFormat(`${good}\n${text}`).confidencePercentages, false, text);
+		}
+		const flagged = checkEvidenceFormat(`${good}\nconfidence: 92%`);
+		assert.equal(flagged.complete, false);
+		assert.match(evidenceNote(flagged) ?? "", /Confidence-Prozentwerte/);
+	});
+	it("treats an empty or free-form answer as incomplete", () => {
+		assert.equal(checkEvidenceFormat("").complete, false);
+		assert.equal(checkEvidenceFormat("Looks fine to me.").missingSections.length, 4);
 	});
 });
