@@ -1,9 +1,15 @@
 /**
  * Temporary agent contract: a task-scoped agent without a role file.
  *
- * The caller (main agent) only *requests* capabilities. The runtime decides
- * what is effective: effective = requested ∩ profile allowance. Anything the
- * profile does not grant is reported as denied, never silently added.
+ * The main agent only describes the objective; it does not request or
+ * negotiate capabilities. Every temporary agent gets the same fixed,
+ * read-only tool set (see TEMPORARY_AGENT_TOOLS) — there is nothing left to
+ * grant or deny per call.
+ *
+ * Verification is not part of this contract. It is a separate, host-owned
+ * path (verifier ticket, workspace fingerprint, dedup, commit gate) built on
+ * a plain named-agent call (`agent: "verifier"`), never on `spec`. A spec
+ * cannot carry a role or profile field, so it cannot impersonate that path.
  */
 
 import type { AgentConfig } from "./agent-types.ts";
@@ -11,24 +17,11 @@ import type { AgentConfig } from "./agent-types.ts";
 /** Marker path of the synthetic, never-persisted temporary agent. */
 export const TEMPORARY_AGENT_FILE_PATH = "<temporary>";
 
-export const TEMPORARY_AGENT_PROFILES = [
-  "analyse",
-  "research",
-  "verify",
-  "implement",
-] as const;
-export type TemporaryAgentProfile = (typeof TEMPORARY_AGENT_PROFILES)[number];
-
-export const TEMPORARY_AGENT_CAPABILITIES = [
-  "read",
-  "search",
-  "readonly_shell",
-  "write",
-  "network",
-  "spawn",
-] as const;
-export type TemporaryAgentCapability =
-  (typeof TEMPORARY_AGENT_CAPABILITIES)[number];
+/**
+ * Fixed, non-negotiable tool set for every temporary agent. Never write,
+ * edit, use the network or spawn further agents.
+ */
+export const TEMPORARY_AGENT_TOOLS = ["read", "grep", "find", "ls"] as const;
 
 /** Hard limits for one temporary agent contract. */
 export const TEMPORARY_SPEC_LIMITS = {
@@ -36,13 +29,9 @@ export const TEMPORARY_SPEC_LIMITS = {
   listItem: 500,
   listItems: 20,
   delegationReason: 500,
-  maxTemporaryAgentsPerRun: 5,
 } as const;
 
-export const MODEL_CLASSES = ["fast", "cheap", "strong", "independent"] as const;
-export type ModelClass = (typeof MODEL_CLASSES)[number];
-
-/** Runtime-owned budgets and model mapping. All values are configurable via config.temporaryAgents. */
+/** Runtime-owned budgets. All values are configurable via config.temporaryAgents. */
 export interface TemporaryAgentsConfig {
   maxPerRun?: number;
   perAgentRuntimeMs?: number;
@@ -51,7 +40,6 @@ export interface TemporaryAgentsConfig {
   /** Cumulative assistant input + output tokens; enforced in the child (all tools blocked once reached). */
   perAgentTokenBudget?: number;
   totalRuntimeMs?: number;
-  modelClasses?: Partial<Record<ModelClass, string>>;
 }
 
 export const TEMPORARY_AGENT_DEFAULTS = {
@@ -95,19 +83,15 @@ export function resolveTemporaryLimits(
 const CONCRETE_MODEL = /^[\w.-]+\/[\w.:@-]+$/;
 
 /**
- * The main agent may state a class or a concrete model; the runtime decides.
- * A class maps to a configured model or falls back to the runtime default.
- * A concrete model is passed on and still has to pass the model scope allow-list.
+ * The main agent may state a concrete provider/model id; the runtime still
+ * has to pass it through the model scope allow-list. Omitted falls back to
+ * the parent/runtime default. There are no model classes to map — a class
+ * that only ever falls back to the default is not a real choice.
  */
 export function resolveTemporaryModel(
   preference: string | undefined,
-  config?: TemporaryAgentsConfig,
-): { model?: string; source: "default" | "class" | "explicit" } {
+): { model?: string; source: "default" | "explicit" } {
   if (!preference) return { source: "default" };
-  if ((MODEL_CLASSES as readonly string[]).includes(preference)) {
-    const mapped = config?.modelClasses?.[preference as ModelClass];
-    return mapped ? { model: mapped, source: "class" } : { source: "default" };
-  }
   return { model: preference, source: "explicit" };
 }
 
@@ -187,13 +171,11 @@ export interface TemporaryAgentMeta {
   name: string;
   objective: string;
   delegationReason: string;
-  profile: TemporaryAgentProfile;
-  scope?: TemporaryAgentSpec["scope"];
+  focusPaths?: TemporaryAgentSpec["focusPaths"];
   model: string | undefined;
-  modelSource: "default" | "class" | "explicit";
+  modelSource: "default" | "explicit";
   write: false;
-  effective: TemporaryAgentCapability[];
-  denied: TemporaryAgentCapability[];
+  tools: readonly string[];
   budgets: {
     runtimeMs: number;
     toolCalls: number;
@@ -208,54 +190,14 @@ export interface TemporaryAgentMeta {
 
 export interface TemporaryAgentSpec {
   objective: string;
-  profile: TemporaryAgentProfile;
-  context?: string[];
-  scope?: { include?: string[]; exclude?: string[] };
-  expectedOutput?: string[];
-  requestedCapabilities?: TemporaryAgentCapability[];
   delegationReason: string;
-  modelPreference?: string;
+  context?: string[];
+  /** Working-area hint written into the child's prompt. Not a sandbox or a security boundary. */
+  focusPaths?: { include?: string[]; exclude?: string[] };
+  expectedOutput?: string[];
   constraints?: string[];
+  modelPreference?: string;
 }
-
-export interface EffectivePolicy {
-  profile: TemporaryAgentProfile;
-  requested: TemporaryAgentCapability[];
-  effective: TemporaryAgentCapability[];
-  denied: TemporaryAgentCapability[];
-  tools: string[];
-  write: false;
-}
-
-/** Capabilities each profile may ever grant. Write/network/spawn are never granted at this stage. */
-const PROFILE_ALLOWANCE: Record<
-  TemporaryAgentProfile,
-  readonly TemporaryAgentCapability[]
-> = {
-  analyse: ["read", "search"],
-  research: ["read", "search"],
-  verify: ["read", "search", "readonly_shell"],
-  implement: [],
-};
-
-const CAPABILITY_TOOLS: Record<TemporaryAgentCapability, readonly string[]> = {
-  read: ["read"],
-  search: ["grep", "find", "ls"],
-  readonly_shell: ["bash"],
-  write: [],
-  network: [],
-  spawn: [],
-};
-
-const DEFAULT_REQUEST: Record<
-  TemporaryAgentProfile,
-  readonly TemporaryAgentCapability[]
-> = {
-  analyse: ["read", "search"],
-  research: ["read", "search"],
-  verify: ["read", "search", "readonly_shell"],
-  implement: [],
-};
 
 export type SpecValidation =
   { ok: true; spec: TemporaryAgentSpec } | { ok: false; errors: string[] };
@@ -301,11 +243,9 @@ export function validateTemporarySpec(input: unknown): SpecValidation {
   const raw = input as Record<string, unknown>;
   const known = new Set([
     "objective",
-    "profile",
     "context",
-    "scope",
+    "focusPaths",
     "expectedOutput",
-    "requestedCapabilities",
     "delegationReason",
     "modelPreference",
     "constraints",
@@ -320,16 +260,6 @@ export function validateTemporarySpec(input: unknown): SpecValidation {
     errors.push(
       `spec.objective allows at most ${TEMPORARY_SPEC_LIMITS.objective} characters.`,
     );
-
-  const profile = raw.profile;
-  if (
-    typeof profile !== "string" ||
-    !(TEMPORARY_AGENT_PROFILES as readonly string[]).includes(profile)
-  ) {
-    errors.push(
-      `spec.profile must be one of: ${TEMPORARY_AGENT_PROFILES.join(", ")}.`,
-    );
-  }
 
   const reason =
     typeof raw.delegationReason === "string" ? raw.delegationReason.trim() : "";
@@ -347,55 +277,27 @@ export function validateTemporarySpec(input: unknown): SpecValidation {
   );
   const constraints = stringList(raw.constraints, "spec.constraints", errors);
 
-  let scope: TemporaryAgentSpec["scope"];
-  if (raw.scope !== undefined) {
-    if (!raw.scope || typeof raw.scope !== "object" || Array.isArray(raw.scope))
-      errors.push("spec.scope must be an object.");
+  let focusPaths: TemporaryAgentSpec["focusPaths"];
+  if (raw.focusPaths !== undefined) {
+    if (!raw.focusPaths || typeof raw.focusPaths !== "object" || Array.isArray(raw.focusPaths))
+      errors.push("spec.focusPaths must be an object.");
     else {
-      const s = raw.scope as Record<string, unknown>;
+      const s = raw.focusPaths as Record<string, unknown>;
       for (const key of Object.keys(s))
         if (key !== "include" && key !== "exclude")
-          errors.push(`Unknown spec.scope field: ${key}.`);
-      scope = {
-        include: stringList(s.include, "spec.scope.include", errors),
-        exclude: stringList(s.exclude, "spec.scope.exclude", errors),
+          errors.push(`Unknown spec.focusPaths field: ${key}.`);
+      focusPaths = {
+        include: stringList(s.include, "spec.focusPaths.include", errors),
+        exclude: stringList(s.exclude, "spec.focusPaths.exclude", errors),
       };
-    }
-  }
-
-  let requestedCapabilities: TemporaryAgentCapability[] | undefined;
-  if (raw.requestedCapabilities !== undefined) {
-    const list = stringList(
-      raw.requestedCapabilities,
-      "spec.requestedCapabilities",
-      errors,
-    );
-    if (list) {
-      const bad = list.filter(
-        (c) => !(TEMPORARY_AGENT_CAPABILITIES as readonly string[]).includes(c),
-      );
-      if (bad.length > 0)
-        errors.push(`Unknown capabilities: ${bad.join(", ")}.`);
-      else
-        requestedCapabilities = [
-          ...new Set(list),
-        ] as TemporaryAgentCapability[];
     }
   }
 
   if (raw.modelPreference !== undefined) {
     const pref =
       typeof raw.modelPreference === "string" ? raw.modelPreference.trim() : "";
-    if (
-      !pref ||
-      !(
-        (MODEL_CLASSES as readonly string[]).includes(pref) ||
-        CONCRETE_MODEL.test(pref)
-      )
-    ) {
-      errors.push(
-        `spec.modelPreference must be one of ${MODEL_CLASSES.join(", ")} or a provider/model id.`,
-      );
+    if (!pref || !CONCRETE_MODEL.test(pref)) {
+      errors.push("spec.modelPreference must be a provider/model id.");
     }
   }
 
@@ -404,38 +306,15 @@ export function validateTemporarySpec(input: unknown): SpecValidation {
     ok: true,
     spec: {
       objective,
-      profile: profile as TemporaryAgentProfile,
       delegationReason: reason,
       ...(context ? { context } : {}),
-      ...(scope ? { scope } : {}),
+      ...(focusPaths ? { focusPaths } : {}),
       ...(expectedOutput ? { expectedOutput } : {}),
-      ...(requestedCapabilities ? { requestedCapabilities } : {}),
       ...(typeof raw.modelPreference === "string"
         ? { modelPreference: raw.modelPreference.trim() }
         : {}),
       ...(constraints ? { constraints } : {}),
     },
-  };
-}
-
-/** effective = requested ∩ profile allowance. The caller cannot widen it. */
-export function resolveEffectivePolicy(
-  spec: TemporaryAgentSpec,
-): EffectivePolicy {
-  const requested = spec.requestedCapabilities ?? [
-    ...DEFAULT_REQUEST[spec.profile],
-  ];
-  const allowed = new Set(PROFILE_ALLOWANCE[spec.profile]);
-  const effective = requested.filter((c) => allowed.has(c));
-  const denied = requested.filter((c) => !allowed.has(c));
-  const tools = [...new Set(effective.flatMap((c) => CAPABILITY_TOOLS[c]))];
-  return {
-    profile: spec.profile,
-    requested,
-    effective,
-    denied,
-    tools,
-    write: false,
   };
 }
 
@@ -446,25 +325,19 @@ function section(title: string, items: string[] | undefined): string {
 }
 
 /** Task text handed to the child; states the limits so the child does not have to guess. */
-export function renderTemporaryTask(
-  spec: TemporaryAgentSpec,
-  policy: EffectivePolicy,
-): string {
+export function renderTemporaryTask(spec: TemporaryAgentSpec): string {
   return [
     `Objective: ${spec.objective}`,
     section("Context", spec.context),
-    section("Scope (include)", spec.scope?.include),
-    section("Scope (exclude)", spec.scope?.exclude),
+    section("Focus paths (include)", spec.focusPaths?.include),
+    section("Focus paths (exclude)", spec.focusPaths?.exclude),
     section("Expected output", spec.expectedOutput),
     section("Constraints", [
       "Do not create subagents.",
       "Do not modify files; you are read-only.",
       ...(spec.constraints ?? []),
     ]),
-    `\nEffective tools: ${policy.tools.join(", ") || "none"}.`,
-    policy.denied.length > 0
-      ? `Denied capabilities (not available): ${policy.denied.join(", ")}.`
-      : "",
+    `\nAvailable tools: ${TEMPORARY_AGENT_TOOLS.join(", ")}.`,
     "\nResult format (no confidence percentages):",
     "- summary",
     "- findings: each with kind (observation | conclusion | assumption) and evidence (file + location, or command, plus reason)",
@@ -485,13 +358,12 @@ export function temporaryAgentName(index: number): string {
 export function buildTemporaryAgentConfig(
   name: string,
   spec: TemporaryAgentSpec,
-  policy: EffectivePolicy,
   model?: string,
 ): AgentConfig {
   return {
     name,
     description: spec.objective.slice(0, 120),
-    tools: policy.tools,
+    tools: [...TEMPORARY_AGENT_TOOLS],
     ...(model ? { model } : {}),
     systemPromptMode: "append",
     inheritProjectContext: false,

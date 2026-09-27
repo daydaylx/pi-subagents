@@ -4,10 +4,10 @@ import {
 	checkEvidenceFormat,
 	evidenceNote,
 	renderTemporaryTask,
-	resolveEffectivePolicy,
 	resolveTemporaryLimits,
 	resolveTemporaryModel,
 	TEMPORARY_AGENT_FILE_PATH,
+	TEMPORARY_AGENT_TOOLS,
 	temporaryAgentName,
 	temporaryAgentStatus,
 	validateTemporarySpec,
@@ -304,13 +304,11 @@ function resolveTemporarySpecLaunch(
 				name: "temp-blocked",
 				objective: spec.objective,
 				delegationReason: spec.delegationReason,
-				profile: spec.profile,
-				...(spec.scope ? { scope: spec.scope } : {}),
+				...(spec.focusPaths ? { focusPaths: spec.focusPaths } : {}),
 				model: undefined,
 				modelSource: "default",
 				write: false,
-				effective: [],
-				denied: spec.requestedCapabilities ?? [],
+				tools: [],
 				budgets: { runtimeMs: 0, toolCalls: 0, turns: 0, tokenBudget: 0, tokenBudgetEnforced: true },
 				status: "policy_blocked",
 			});
@@ -325,24 +323,17 @@ function resolveTemporarySpecLaunch(
 	if (params.context === "fork") {
 		return blocked("Temporary agents are stateless and start with fresh context; context 'fork' is not allowed with spec.");
 	}
+	if (params.async === true) {
+		return blocked("Temporary agents always run synchronously in the foreground; async is not allowed with spec.");
+	}
 	const validation = validateTemporarySpec(params.spec);
 	if (!validation.ok) return blocked(`Invalid temporary agent spec: ${validation.errors.join(" ")}`);
 	const spec = validation.spec;
-	if (spec.profile === "verify") {
-		// Verification runs through the host's verifier chain (ticket, dedup, commit gate),
-		// which translates a verify spec into the checked verifier call before it gets here.
-		// A verify spec that still reaches the executor (e.g. via RPC) has bypassed that chain.
-		return blocked("Policy blocked: profile 'verify' is only available through the host's verifier chain, not as a direct temporary agent.", spec);
-	}
 	const limits = resolveTemporaryLimits(config.temporaryAgents);
 	const used = state.temporaryAgentCount?.count ?? 0;
 	const reserved = state.temporaryAgentCount?.reservedRuntimeMs ?? 0;
 	if (used >= limits.maxPerRun) {
 		return blocked(`Temporary agent limit reached (${used}/${limits.maxPerRun}). Complete the work directly.`, spec);
-	}
-	const policy = resolveEffectivePolicy(spec);
-	if (policy.tools.length === 0) {
-		return blocked(`Policy blocked: profile '${spec.profile}' grants no tools for the requested capabilities (denied: ${policy.denied.join(", ") || "none"}). Only the main agent may write.`, spec);
 	}
 	// The caller can only shorten the per-agent runtime, never exceed the runtime cap.
 	const runtimeMs = Math.min(params.timeoutMs ?? params.maxRuntimeMs ?? limits.perAgentRuntimeMs, limits.perAgentRuntimeMs);
@@ -351,18 +342,16 @@ function resolveTemporarySpecLaunch(
 	}
 	state.temporaryAgentCount = { count: used + 1, reservedRuntimeMs: reserved + runtimeMs };
 	const name = temporaryAgentName(used + 1);
-	const model = resolveTemporaryModel(spec.modelPreference, config.temporaryAgents);
+	const model = resolveTemporaryModel(spec.modelPreference);
 	temporaryMetaByCall.set(callId, {
 		name,
 		objective: spec.objective,
 		delegationReason: spec.delegationReason,
-		profile: spec.profile,
-		...(spec.scope ? { scope: spec.scope } : {}),
+		...(spec.focusPaths ? { focusPaths: spec.focusPaths } : {}),
 		model: model.model,
 		modelSource: model.source,
 		write: false,
-		effective: policy.effective,
-		denied: policy.denied,
+		tools: TEMPORARY_AGENT_TOOLS,
 		budgets: { runtimeMs, toolCalls: limits.perAgentToolCalls, turns: limits.perAgentTurns, tokenBudget: limits.perAgentTokenBudget, tokenBudgetEnforced: true },
 		status: "running",
 	});
@@ -370,7 +359,7 @@ function resolveTemporarySpecLaunch(
 		params: {
 			...params,
 			agent: name,
-			task: renderTemporaryTask(spec, policy),
+			task: renderTemporaryTask(spec),
 			context: "fresh",
 			timeoutMs: runtimeMs,
 			maxRuntimeMs: undefined,
@@ -379,7 +368,7 @@ function resolveTemporarySpecLaunch(
 			turnBudget: { maxTurns: limits.perAgentTurns, graceTurns: 2 },
 			artifacts: params.artifacts,
 		},
-		agent: buildTemporaryAgentConfig(name, spec, policy, model.model),
+		agent: buildTemporaryAgentConfig(name, spec, model.model),
 	};
 }
 

@@ -5,15 +5,15 @@ import {
 	checkEvidenceFormat,
 	evidenceNote,
 	renderTemporaryTask,
-	resolveEffectivePolicy,
 	resolveTemporaryLimits,
 	resolveTemporaryModel,
 	TEMPORARY_AGENT_FILE_PATH,
+	TEMPORARY_AGENT_TOOLS,
 	temporaryAgentStatus,
 	validateTemporarySpec,
 } from "../../src/agents/temporary-spec.ts";
 
-const base = { objective: "Find why read is blocked", profile: "analyse", delegationReason: "independent analysis" };
+const base = { objective: "Find why read is blocked", delegationReason: "independent analysis" };
 
 function valid(overrides: Record<string, unknown> = {}) {
 	const result = validateTemporarySpec({ ...base, ...overrides });
@@ -27,58 +27,51 @@ describe("temporary agent spec validation", () => {
 		const result = validateTemporarySpec({ ...base, objective: " " });
 		assert.equal(result.ok, false);
 	});
-	it("rejects missing delegationReason, unknown profile and unknown fields", () => {
+	it("rejects missing delegationReason and unknown fields", () => {
 		assert.equal(validateTemporarySpec({ ...base, delegationReason: "" }).ok, false);
-		assert.equal(validateTemporarySpec({ ...base, profile: "security" }).ok, false);
 		assert.equal(validateTemporarySpec({ ...base, tools: ["write"] }).ok, false);
 		assert.equal(validateTemporarySpec("nope").ok, false);
 	});
-	it("rejects unknown capabilities and oversized lists", () => {
-		assert.equal(validateTemporarySpec({ ...base, requestedCapabilities: ["root"] }).ok, false);
+	it("rejects a role, capability request or verify sentinel — none of these fields exist in the contract", () => {
+		assert.equal(validateTemporarySpec({ ...base, profile: "analyse" }).ok, false);
+		assert.equal(validateTemporarySpec({ ...base, kind: "verify" }).ok, false);
+		assert.equal(validateTemporarySpec({ ...base, requestedCapabilities: ["read"] }).ok, false);
+	});
+	it("rejects oversized lists", () => {
 		assert.equal(validateTemporarySpec({ ...base, context: Array(21).fill("x") }).ok, false);
+	});
+	it("renames scope to focusPaths and rejects unknown focusPaths fields", () => {
+		assert.equal(validateTemporarySpec({ ...base, scope: { include: ["src/"] } }).ok, false);
+		const result = validateTemporarySpec({ ...base, focusPaths: { include: ["src/"], exclude: ["dist/"] } });
+		assert.equal(result.ok, true);
+		if (result.ok) assert.deepEqual(result.spec.focusPaths, { include: ["src/"], exclude: ["dist/"] });
+		assert.equal(validateTemporarySpec({ ...base, focusPaths: { bogus: ["x"] } }).ok, false);
 	});
 });
 
-describe("temporary agent effective policy", () => {
-	it("defaults to read/search without write", () => {
-		const policy = resolveEffectivePolicy(valid());
-		assert.deepEqual(policy.tools, ["read", "grep", "find", "ls"]);
-		assert.equal(policy.write, false);
-	});
-	it("denies write, network, spawn and shell for analyse", () => {
-		const policy = resolveEffectivePolicy(valid({ requestedCapabilities: ["read", "write", "network", "spawn", "readonly_shell"] }));
-		assert.deepEqual(policy.effective, ["read"]);
-		assert.deepEqual(policy.denied, ["write", "network", "spawn", "readonly_shell"]);
-		assert.deepEqual(policy.tools, ["read"]);
-	});
-	it("allows readonly shell only for verify", () => {
-		const policy = resolveEffectivePolicy(valid({ profile: "verify" }));
-		assert.ok(policy.tools.includes("bash"));
-		assert.ok(!policy.tools.includes("write") && !policy.tools.includes("edit"));
-	});
-	it("grants no tools for implement", () => {
-		assert.deepEqual(resolveEffectivePolicy(valid({ profile: "implement", requestedCapabilities: ["write"] })).tools, []);
+describe("temporary agent tool set", () => {
+	it("is fixed and read-only for every spec, with nothing to request or deny", () => {
+		assert.deepEqual(TEMPORARY_AGENT_TOOLS, ["read", "grep", "find", "ls"]);
 	});
 });
 
 describe("temporary agent config", () => {
-	it("is in-memory, depth-0 and limited to effective tools", () => {
+	it("is in-memory, depth-0 and limited to the fixed tool set", () => {
 		const spec = valid({ modelPreference: "provider/model" });
-		const policy = resolveEffectivePolicy(spec);
-		const config = buildTemporaryAgentConfig("temp-1", spec, policy, "provider/model");
+		const config = buildTemporaryAgentConfig("temp-1", spec, "provider/model");
 		assert.equal(config.maxSubagentDepth, 0);
 		assert.equal(config.filePath, "<temporary>");
 		assert.equal(config.model, "provider/model");
-		assert.equal(buildTemporaryAgentConfig("temp-2", spec, policy).model, undefined);
-		assert.deepEqual(config.tools, policy.tools);
-		assert.match(renderTemporaryTask(spec, policy), /Do not create subagents/);
+		assert.equal(buildTemporaryAgentConfig("temp-2", spec).model, undefined);
+		assert.deepEqual(config.tools, [...TEMPORARY_AGENT_TOOLS]);
+		assert.match(renderTemporaryTask(spec), /Do not create subagents/);
 	});
 });
 
 describe("stateless and minimal context (rules 1, 2)", () => {
 	it("has no memory, no persistence and no inherited project context", () => {
 		const spec = valid();
-		const config = buildTemporaryAgentConfig("temp-1", spec, resolveEffectivePolicy(spec));
+		const config = buildTemporaryAgentConfig("temp-1", spec);
 		assert.equal(config.memory, undefined);
 		assert.equal(config.inheritProjectContext, false);
 		assert.equal(config.inheritSkills, false);
@@ -89,7 +82,7 @@ describe("stateless and minimal context (rules 1, 2)", () => {
 	});
 	it("cannot delegate further (rule 9: no agent-to-agent channel)", () => {
 		const spec = valid();
-		const config = buildTemporaryAgentConfig("temp-1", spec, resolveEffectivePolicy(spec));
+		const config = buildTemporaryAgentConfig("temp-1", spec);
 		assert.equal(config.maxSubagentDepth, 0);
 		for (const tool of ["subagent", "intercom", "contact_supervisor", "write", "edit"]) {
 			assert.ok(!config.tools?.includes(tool), tool);
@@ -98,20 +91,15 @@ describe("stateless and minimal context (rules 1, 2)", () => {
 });
 
 describe("model preference (rule 3)", () => {
-	it("accepts classes and provider/model ids only", () => {
-		for (const ok of ["fast", "cheap", "strong", "independent", "openai/gpt-5.6"]) {
-			assert.equal(validateTemporarySpec({ ...base, modelPreference: ok }).ok, true, ok);
-		}
-		for (const bad of ["gpt", "", "a b/c", 5]) {
+	it("accepts provider/model ids only — no model classes", () => {
+		assert.equal(validateTemporarySpec({ ...base, modelPreference: "openai/gpt-5.6" }).ok, true);
+		for (const bad of ["fast", "cheap", "strong", "independent", "gpt", "", "a b/c", 5]) {
 			assert.equal(validateTemporarySpec({ ...base, modelPreference: bad }).ok, false, String(bad));
 		}
 	});
-	it("maps a class through runtime config and falls back to the default", () => {
-		const cfg = { modelClasses: { cheap: "prov/small" } };
-		assert.deepEqual(resolveTemporaryModel("cheap", cfg), { model: "prov/small", source: "class" });
-		assert.deepEqual(resolveTemporaryModel("strong", cfg), { source: "default" });
-		assert.deepEqual(resolveTemporaryModel(undefined, cfg), { source: "default" });
-		assert.deepEqual(resolveTemporaryModel("a/b", cfg), { model: "a/b", source: "explicit" });
+	it("passes a concrete model through and falls back to the default otherwise", () => {
+		assert.deepEqual(resolveTemporaryModel("a/b"), { model: "a/b", source: "explicit" });
+		assert.deepEqual(resolveTemporaryModel(undefined), { source: "default" });
 	});
 });
 
@@ -141,7 +129,7 @@ describe("status vocabulary (rule 5)", () => {
 describe("evidence-based result contract (rules 6, 7)", () => {
 	it("asks for evidence and forbids confidence percentages", () => {
 		const spec = valid();
-		const text = renderTemporaryTask(spec, resolveEffectivePolicy(spec));
+		const text = renderTemporaryTask(spec);
 		assert.match(text, /no confidence percentages/);
 		assert.match(text, /observation \| conclusion \| assumption/);
 		assert.match(text, /open assumptions/);

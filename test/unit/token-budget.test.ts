@@ -8,7 +8,7 @@ import {
 	validateToolBudgetConfig,
 } from "../../src/runs/shared/tool-budget.ts";
 import registerSubagentPromptRuntime from "../../src/runs/shared/subagent-prompt-runtime.ts";
-import { buildTemporaryAgentConfig, resolveEffectivePolicy, TEMPORARY_AGENT_DEFAULTS } from "../../src/agents/temporary-spec.ts";
+import { buildTemporaryAgentConfig, TEMPORARY_AGENT_DEFAULTS } from "../../src/agents/temporary-spec.ts";
 
 const original = process.env[TOOL_BUDGET_ENV];
 afterEach(() => {
@@ -85,7 +85,7 @@ describe("token budget enforcement in the child", () => {
 describe("temporary agent token budget wiring", () => {
 	it("has a sane default cap", () => {
 		assert.ok(TEMPORARY_AGENT_DEFAULTS.perAgentTokenBudget >= 100_000);
-		const spec = { objective: "x", profile: "analyse", delegationReason: "r" } as const;
-		assert.ok(buildTemporaryAgentConfig("temp-1", spec, resolveEffectivePolicy(spec)));
+		const spec = { objective: "x", delegationReason: "r" } as const;
+		assert.ok(buildTemporaryAgentConfig("temp-1", spec));
 	});
 });

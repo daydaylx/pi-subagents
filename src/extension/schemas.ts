@@ -316,11 +316,14 @@ export const SubagentParams = keepTopLevelParameterDescriptions(SubagentParamsSc
 export const HARNESS_MANAGEMENT_ACTIONS = ["list", "status", "stop", "interrupt"] as const;
 
 const HarnessSubagentParamsSchema = Type.Object({
-	agent: Type.Optional(Type.String({ description: "Agent name (SINGLE mode)" })),
+	agent: Type.Optional(Type.String({
+		enum: ["verifier"],
+		description: "Reserved for the host's internal verifier delegation chain. Normal delegation always uses spec, never agent.",
+	})),
 	spec: Type.Optional(Type.Unsafe({
 		type: "object",
 		additionalProperties: true,
-		description: "Temporary task agent contract (instead of agent): {objective, profile: analyse|research|verify|implement, delegationReason, context?, scope?, expectedOutput?, requestedCapabilities?, modelPreference?, constraints?}. The runtime decides effective permissions; requested capabilities can only narrow them.",
+		description: "Temporary task agent contract (instead of agent): {objective, delegationReason, context?, focusPaths?, expectedOutput?, modelPreference?, constraints?}. Every temporary agent gets the same fixed, read-only tool set (read, grep, find, ls); there is no role and no capability negotiation. focusPaths is a working-area hint for the prompt, not a security boundary.",
 	})),
 	task: Type.Optional(Type.String({ description: "Task (SINGLE mode, optional for self-contained agents)" })),
 	action: Type.Optional(Type.String({

@@ -15,7 +15,7 @@ try {
 }
 const createSubagentExecutor = executorMod?.createSubagentExecutor;
 
-const spec = { objective: "Find the cause", profile: "analyse", delegationReason: "independent analysis" };
+const spec = { objective: "Find the cause", delegationReason: "independent analysis" };
 
 function makeState(cwd: string, extra: Record<string, unknown> = {}) {
 	return {
@@ -75,23 +75,19 @@ describe("temporary agent spec executor policy", { skip: !createSubagentExecutor
 		assert.match(result.content[0].text, /fresh context/);
 	});
 
-	it("blocks write-only profiles as policy_blocked with visible metadata", async () => {
-		const result = await run({ spec: { ...spec, profile: "implement", requestedCapabilities: ["write"] } });
-		assert.equal(result.isError, true);
-		assert.match(result.content[0].text, /Policy blocked/);
-		const meta = result.details.temporaryAgent;
-		assert.equal(meta.status, "policy_blocked");
-		assert.equal(meta.write, false);
-		assert.equal(meta.objective, "Find the cause");
-		assert.equal(meta.delegationReason, "independent analysis");
+	it("rejects a spec carrying a role, capability request or verify sentinel — no such fields exist", async () => {
+		for (const bad of [{ ...spec, profile: "implement" }, { ...spec, kind: "verify" }, { ...spec, requestedCapabilities: ["write"] }]) {
+			const result = await run({ spec: bad });
+			assert.equal(result.isError, true);
+			assert.match(result.content[0].text, /Invalid temporary agent spec/);
+		}
 	});
 
-	it("blocks a direct verify spec (must go through the host verifier chain)", async () => {
+	it("rejects async combined with spec (temporary agents are always synchronous)", async () => {
 		const state = {};
-		const result = await run({ spec: { ...spec, profile: "verify" } }, state);
+		const result = await run({ spec, async: true }, state);
 		assert.equal(result.isError, true);
-		assert.match(result.content[0].text, /verifier chain/);
-		assert.equal(result.details.temporaryAgent.status, "policy_blocked");
+		assert.match(result.content[0].text, /always run synchronously/);
 		assert.equal((state as any).temporaryAgentCount, undefined);
 	});
 

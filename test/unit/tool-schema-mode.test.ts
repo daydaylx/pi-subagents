@@ -65,12 +65,19 @@ describe("toolSchemaMode", () => {
 });
 
 describe("reduced harness parameter surface", () => {
-	it("accepts single execution", () => {
+	it("accepts a temporary agent spec execution", () => {
 		const accepted = validate(HarnessSubagentParams, {
-			agent: "investigator",
-			task: "locate the change surface",
-		}) as { agent: string };
-		assert.equal(accepted.agent, "investigator");
+			spec: { objective: "locate the change surface", delegationReason: "independent analysis" },
+		}) as { spec: { objective: string } };
+		assert.equal(accepted.spec.objective, "locate the change surface");
+	});
+
+	it("accepts only the reserved verifier name for agent, not an arbitrary named agent", () => {
+		assert.doesNotThrow(() => validate(HarnessSubagentParams, { agent: "verifier", task: "check the diff" }));
+		assert.ok(
+			rejects(HarnessSubagentParams, { agent: "investigator", task: "locate the change surface" }),
+			"a named agent other than verifier must be rejected by the reduced surface",
+		);
 	});
 
 	it("accepts exactly the four management actions", () => {
