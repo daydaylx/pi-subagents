@@ -24,6 +24,16 @@ export interface RunEntry {
 	// toolCalls budget field elsewhere in this package.
 	model?: string;
 	internalToolCalls?: number;
+	// Reasoning/thinking token count, straight off SingleResult.usage.reasoning
+	// (Usage type, shared/types/basic.ts). Undefined -- not 0 -- whenever no
+	// turn's provider reported a reasoning breakdown at all.
+	reasoningTokens?: number;
+	// Provenance for why the calling harness's guard permitted this run
+	// (e.g. daydaylx/pi's Need-Gate: required/justified + a reason code).
+	// Only ever present on verifier-agent entries; absent everywhere else,
+	// including verifier entries from callers with no such guard.
+	verifierDecision?: string;
+	verifierTrigger?: string;
 }
 
 const ROTATE_READ_THRESHOLD = 1200;
@@ -39,6 +49,9 @@ export interface RecordRunExtras {
 	cost?: number;
 	model?: string;
 	internalToolCalls?: number;
+	reasoningTokens?: number;
+	verifierDecision?: string;
+	verifierTrigger?: string;
 }
 
 export function recordRun(
@@ -61,6 +74,9 @@ export function recordRun(
 			...(typeof extras?.cost === "number" ? { cost: extras.cost } : {}),
 			...(extras?.model ? { model: extras.model } : {}),
 			...(typeof extras?.internalToolCalls === "number" ? { internalToolCalls: extras.internalToolCalls } : {}),
+			...(typeof extras?.reasoningTokens === "number" ? { reasoningTokens: extras.reasoningTokens } : {}),
+			...(extras?.verifierDecision ? { verifierDecision: extras.verifierDecision } : {}),
+			...(extras?.verifierTrigger ? { verifierTrigger: extras.verifierTrigger } : {}),
 		};
 		const historyPath = getHistoryPath();
 		fs.mkdirSync(path.dirname(historyPath), { recursive: true });

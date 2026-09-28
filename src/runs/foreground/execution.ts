@@ -95,6 +95,9 @@ function sumUsage(target: Usage, source: Usage): void {
 	target.cacheWrite += source.cacheWrite;
 	target.cost += source.cost;
 	target.turns += source.turns;
+	if (source.reasoning !== undefined) {
+		target.reasoning = (target.reasoning ?? 0) + source.reasoning;
+	}
 }
 
 function formatTimeoutMessage(timeoutMs: number): string {
@@ -769,6 +772,15 @@ async function runSingleAttempt(
 						result.usage.cacheRead += u.cacheRead || 0;
 						result.usage.cacheWrite += u.cacheWrite || 0;
 						result.usage.cost += u.cost?.total || 0;
+						// Not every locally resolved @earendil-works/pi-ai version's Usage
+						// type declares `reasoning` yet, so this reads it defensively off
+						// the raw value rather than depending on that field existing on
+						// the imported type -- same pattern shared/child-transcript.ts's
+						// normalizeUsage() already uses for exactly this reason.
+						const rawReasoning = (u as { reasoning?: unknown }).reasoning;
+						if (typeof rawReasoning === "number") {
+							result.usage.reasoning = (result.usage.reasoning ?? 0) + rawReasoning;
+						}
 						progress.tokens = result.usage.input + result.usage.output;
 					}
 					if (!result.model && evt.message.model) result.model = evt.message.model;

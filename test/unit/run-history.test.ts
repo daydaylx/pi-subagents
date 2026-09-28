@@ -9,7 +9,7 @@ let tempDir = "";
 let agentDir = "";
 let oldAgentDir: string | undefined;
 
-describe("run-history model/internalToolCalls extras", () => {
+describe("run-history model/internalToolCalls/reasoningTokens extras", () => {
 	beforeEach(() => {
 		oldAgentDir = process.env.PI_CODING_AGENT_DIR;
 		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-run-history-"));
@@ -23,26 +23,42 @@ describe("run-history model/internalToolCalls extras", () => {
 		fs.rmSync(tempDir, { recursive: true, force: true });
 	});
 
-	it("persists model and internalToolCalls when both are given", () => {
+	it("persists model, internalToolCalls, reasoningTokens, verifierDecision, and verifierTrigger when all are given", () => {
 		recordRun("verifier", "Check the diff", 0, 1234, {
 			cwd: "/workspace",
 			tokens: { input: 10, output: 5 },
 			cost: 0.01,
 			model: "provider/model-a",
 			internalToolCalls: 7,
+			reasoningTokens: 42,
+			verifierDecision: "justified",
+			verifierTrigger: "uncovered_behavior",
 		});
 		const [entry] = loadRunsForAgent("verifier");
 		assert.ok(entry);
 		assert.equal(entry.model, "provider/model-a");
 		assert.equal(entry.internalToolCalls, 7);
+		assert.equal(entry.reasoningTokens, 42);
+		assert.equal(entry.verifierDecision, "justified");
+		assert.equal(entry.verifierTrigger, "uncovered_behavior");
 	});
 
-	it("omits model and internalToolCalls when the caller does not supply them", () => {
+	it("omits model, internalToolCalls, reasoningTokens, verifierDecision, and verifierTrigger when the caller does not supply them", () => {
 		recordRun("investigator", "Look around", 0, 10);
 		const [entry] = loadRunsForAgent("investigator");
 		assert.ok(entry);
 		assert.equal("model" in entry, false, "no fabricated model field");
 		assert.equal("internalToolCalls" in entry, false, "no fabricated tool-call count");
+		assert.equal("reasoningTokens" in entry, false, "no fabricated reasoning-token count");
+		assert.equal("verifierDecision" in entry, false, "no fabricated verifier decision");
+		assert.equal("verifierTrigger" in entry, false, "no fabricated verifier trigger");
+	});
+
+	it("treats a zero reasoning-token count as a real measurement, not an absent one", () => {
+		recordRun("worker", "Reported zero reasoning", 0, 5, { reasoningTokens: 0 });
+		const [entry] = loadRunsForAgent("worker");
+		assert.ok(entry);
+		assert.equal(entry.reasoningTokens, 0);
 	});
 
 	it("treats a zero tool-call count as a real measurement, not an absent one", () => {

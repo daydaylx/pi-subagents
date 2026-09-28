@@ -399,6 +399,7 @@ async function runParallelChainTasks(input: ParallelChainRunInput): Promise<Sing
 				cost: stepCost.costUsd,
 				model: result.model,
 				internalToolCalls: result.progress?.toolCount,
+				reasoningTokens: stepUsage.reasoning,
 			});
 			return result;
 		},
@@ -1266,6 +1267,7 @@ export async function executeChain(params: ChainExecutionParams): Promise<ChainE
 				cost: seqCost.costUsd,
 				model: r.model,
 				internalToolCalls: r.progress?.toolCount,
+				reasoningTokens: seqUsage.reasoning,
 			});
 
 			globalTaskIndex++;

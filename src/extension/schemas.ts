@@ -298,6 +298,13 @@ const SubagentParamsSchema = Type.Object({
 	skill: Type.Optional(SkillOverride),
 	model: Type.Optional(Type.String({ description: "Override model for single agent (e.g. 'anthropic/claude-sonnet-4')" })),
 	acceptance: Type.Optional(AcceptanceOverride),
+	verifierRisk: Type.Optional(Type.Object({
+		decision: Type.String({ enum: ["required", "justified"] }),
+		trigger: Type.String(),
+	}, {
+		additionalProperties: false,
+		description: "Caller-independent provenance for why this run was permitted, attached by the calling harness's own guard after its own risk assessment already ran (not part of any model-facing contract; the caller cannot set this to grant itself anything). Recorded on run-history.jsonl for benchmark telemetry only.",
+	})),
 });
 
 export const SubagentParams = keepTopLevelParameterDescriptions(SubagentParamsSchema);

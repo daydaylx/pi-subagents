@@ -338,6 +338,9 @@ export function sumResultsUsage(results: SingleResult[]): Usage {
 		usage.cacheWrite += result.usage.cacheWrite;
 		usage.cost += result.usage.cost;
 		usage.turns += result.usage.turns;
+		if (result.usage.reasoning !== undefined) {
+			usage.reasoning = (usage.reasoning ?? 0) + result.usage.reasoning;
+		}
 	}
 	return usage;
 }

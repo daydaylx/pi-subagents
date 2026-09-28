@@ -189,6 +189,9 @@ export interface SubagentParamsLike {
 	acceptance?: AcceptanceInput;
 	schedule?: string;
 	scheduleName?: string;
+	// Guard-injected provenance (never set by a model-facing caller); see
+	// schemas.ts's verifierRisk field description.
+	verifierRisk?: { decision: string; trigger: string };
 }
 
 interface ExecutorDeps {
@@ -2875,6 +2878,7 @@ async function runParallelPath(data: ExecutionContextData, deps: ExecutorDeps): 
 				cost: runCost.costUsd,
 				model: run.model,
 				internalToolCalls: run.progress?.toolCount,
+				reasoningTokens: runUsage.reasoning,
 			});
 		}
 
@@ -3203,6 +3207,9 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 		cost: singleCost.costUsd,
 		model: r.model,
 		internalToolCalls: r.progress?.toolCount,
+		reasoningTokens: singleUsage.reasoning,
+		verifierDecision: params.verifierRisk?.decision,
+		verifierTrigger: params.verifierRisk?.trigger,
 	});
 
 	if (r.progress) allProgress.push(r.progress);

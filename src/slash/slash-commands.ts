@@ -393,6 +393,9 @@ function addUsage(target: Usage, source: Usage): void {
 	target.cacheWrite += source.cacheWrite;
 	target.cost += source.cost;
 	target.turns += source.turns;
+	if (source.reasoning !== undefined) {
+		target.reasoning = (target.reasoning ?? 0) + source.reasoning;
+	}
 }
 
 function usageHasValue(usage: Usage): boolean {
@@ -409,6 +412,7 @@ function assistantUsageFromMessage(message: unknown): Usage | undefined {
 		cacheRead?: unknown;
 		cacheWrite?: unknown;
 		cost?: { total?: unknown };
+		reasoning?: unknown;
 	};
 	return {
 		input: typeof usage.input === "number" ? usage.input : 0,
@@ -417,6 +421,7 @@ function assistantUsageFromMessage(message: unknown): Usage | undefined {
 		cacheWrite: typeof usage.cacheWrite === "number" ? usage.cacheWrite : 0,
 		cost: typeof usage.cost?.total === "number" ? usage.cost.total : 0,
 		turns: 1,
+		...(typeof usage.reasoning === "number" ? { reasoning: usage.reasoning } : {}),
 	};
 }
 

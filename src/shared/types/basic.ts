@@ -90,6 +90,13 @@ export interface Usage {
   cacheWrite: number;
   cost: number;
   turns: number;
+  /**
+   * Reasoning/thinking tokens, mirroring @earendil-works/pi-ai's own Usage
+   * field: a subset of `output`, set to a number (possibly 0) once at least
+   * one turn reported it, left undefined when no turn's provider exposed a
+   * reasoning breakdown at all -- never guessed.
+   */
+  reasoning?: number;
 }
 
 export interface TurnBudgetConfig {
