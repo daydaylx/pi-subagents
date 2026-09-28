@@ -397,6 +397,8 @@ async function runParallelChainTasks(input: ParallelChainRunInput): Promise<Sing
 				cwd: taskCwd,
 				tokens: { input: stepUsage.input, output: stepUsage.output, cacheRead: stepUsage.cacheRead, cacheWrite: stepUsage.cacheWrite },
 				cost: stepCost.costUsd,
+				model: result.model,
+				internalToolCalls: result.progress?.toolCount,
 			});
 			return result;
 		},
@@ -1262,6 +1264,8 @@ export async function executeChain(params: ChainExecutionParams): Promise<ChainE
 				cwd: resolveChildCwd(cwd ?? ctx.cwd, seqStep.cwd),
 				tokens: { input: seqUsage.input, output: seqUsage.output, cacheRead: seqUsage.cacheRead, cacheWrite: seqUsage.cacheWrite },
 				cost: seqCost.costUsd,
+				model: r.model,
+				internalToolCalls: r.progress?.toolCount,
 			});
 
 			globalTaskIndex++;

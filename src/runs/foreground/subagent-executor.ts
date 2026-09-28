@@ -2873,6 +2873,8 @@ async function runParallelPath(data: ExecutionContextData, deps: ExecutorDeps): 
 				cwd: effectiveCwd,
 				tokens: { input: runUsage.input, output: runUsage.output, cacheRead: runUsage.cacheRead, cacheWrite: runUsage.cacheWrite },
 				cost: runCost.costUsd,
+				model: run.model,
+				internalToolCalls: run.progress?.toolCount,
 			});
 		}
 
@@ -3199,6 +3201,8 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 		cwd: effectiveCwd,
 		tokens: { input: singleUsage.input, output: singleUsage.output, cacheRead: singleUsage.cacheRead, cacheWrite: singleUsage.cacheWrite },
 		cost: singleCost.costUsd,
+		model: r.model,
+		internalToolCalls: r.progress?.toolCount,
 	});
 
 	if (r.progress) allProgress.push(r.progress);

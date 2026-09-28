@@ -16,6 +16,14 @@ export interface RunEntry {
 	cwd?: string;
 	tokens?: { input: number; output: number; cacheRead?: number; cacheWrite?: number };
 	cost?: number;
+	// Effective model string (e.g. "provider/id") the run actually used, and
+	// the number of tool calls the run made. Both come straight off the
+	// SingleResult the caller already has (result.model, result.progress?.toolCount)
+	// -- no new tracking, just passed through instead of dropped. Named
+	// internalToolCalls (not toolCalls) to avoid colliding with the unrelated
+	// toolCalls budget field elsewhere in this package.
+	model?: string;
+	internalToolCalls?: number;
 }
 
 const ROTATE_READ_THRESHOLD = 1200;
@@ -29,6 +37,8 @@ export interface RecordRunExtras {
 	cwd?: string;
 	tokens?: { input: number; output: number; cacheRead?: number; cacheWrite?: number };
 	cost?: number;
+	model?: string;
+	internalToolCalls?: number;
 }
 
 export function recordRun(
@@ -49,6 +59,8 @@ export function recordRun(
 			...(extras?.cwd ? { cwd: extras.cwd } : {}),
 			...(extras?.tokens ? { tokens: extras.tokens } : {}),
 			...(typeof extras?.cost === "number" ? { cost: extras.cost } : {}),
+			...(extras?.model ? { model: extras.model } : {}),
+			...(typeof extras?.internalToolCalls === "number" ? { internalToolCalls: extras.internalToolCalls } : {}),
 		};
 		const historyPath = getHistoryPath();
 		fs.mkdirSync(path.dirname(historyPath), { recursive: true });
