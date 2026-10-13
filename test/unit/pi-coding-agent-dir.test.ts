@@ -7,6 +7,7 @@ import { discoverAgentsAll } from "../../src/agents/agents.ts";
 import { handleCreate } from "../../src/agents/agent-management.ts";
 import { clearSkillCache, discoverAvailableSkills, resolveSkillPath } from "../../src/agents/skills.ts";
 import { loadConfig } from "../../src/extension/config.ts";
+import { resolveToolSchemaMode } from "../../src/extension/schemas.ts";
 import { diagnoseIntercomBridge, resolveIntercomBridge } from "../../src/intercom/intercom-bridge.ts";
 import { loadRunsForAgent, recordRun } from "../../src/runs/shared/run-history.ts";
 import { cleanupAllArtifactDirs } from "../../src/shared/artifacts.ts";
@@ -84,6 +85,19 @@ describe("PI_CODING_AGENT_DIR runtime paths", () => {
 		const config = loadConfig();
 		assert.equal(config.asyncByDefault, true);
 		assert.equal(config.maxSubagentDepth, 3);
+	});
+
+	it("uses the harness tool schema after a config read or parse failure, while a missing file keeps defaults", () => {
+		const configPath = path.join(agentDir, "extensions", "subagent", "config.json");
+		assert.equal(resolveToolSchemaMode(loadConfig()), "full");
+		writeFile(configPath, "{ invalid json");
+		const originalError = console.error;
+		console.error = () => {};
+		try {
+			assert.equal(loadConfig().toolSchemaMode, "harness");
+		} finally {
+			console.error = originalError;
+		}
 	});
 
 	it("discovers user agents, chains, and settings under the configured agent dir", () => {

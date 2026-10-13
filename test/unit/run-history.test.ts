@@ -78,4 +78,26 @@ describe("run-history model/internalToolCalls/reasoningTokens extras", () => {
 		assert.equal((entry as unknown as Record<string, unknown>).toolCalls, undefined);
 		assert.equal(entry.internalToolCalls, 3);
 	});
+
+	it("rotates oversized history on write and keeps the newest entries", () => {
+		const historyPath = path.join(agentDir, "run-history.jsonl");
+		fs.mkdirSync(agentDir, { recursive: true });
+		const oldEntries = Array.from({ length: 1400 }, (_, index) => JSON.stringify({ agent: "worker", task: `old-${index}-${"x".repeat(300)}`, ts: index, status: "ok", duration: 1 }));
+		fs.writeFileSync(historyPath, `${oldEntries.join("\n")}\n`);
+		recordRun("worker", "newest", 0, 2);
+		const lines = fs.readFileSync(historyPath, "utf-8").trimEnd().split("\n");
+		assert.ok(lines.length <= 1000);
+		assert.equal(JSON.parse(lines.at(-1)!).task, "newest");
+	});
+
+	it("leaves a small history intact and tolerates malformed lines and a missing file", () => {
+		const historyPath = path.join(agentDir, "run-history.jsonl");
+		fs.mkdirSync(agentDir, { recursive: true });
+		fs.writeFileSync(historyPath, "not-json\n");
+		recordRun("worker", "small", 0, 2);
+		assert.match(fs.readFileSync(historyPath, "utf-8"), /^not-json\n/);
+		assert.doesNotThrow(() => loadRunsForAgent("worker"));
+		fs.rmSync(historyPath);
+		assert.doesNotThrow(() => recordRun("worker", "recreated", 0, 3));
+	});
 });

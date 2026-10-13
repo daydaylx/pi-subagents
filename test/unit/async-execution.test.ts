@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, it } from "node:test";
-import { buildAsyncRunnerSteps, resolveAsyncRunnerLogPaths } from "../../src/runs/background/async-execution.ts";
+import { ASYNC_DIR, DEFAULT_ARTIFACT_CONFIG } from "../../src/shared/types.ts";
+import { buildAsyncRunnerSteps, executeAsyncSingle, resolveAsyncRunnerLogPaths } from "../../src/runs/background/async-execution.ts";
 import type { AgentConfig } from "../../src/agents/agents.ts";
 
 const agent = (name: string, toolBudget?: AgentConfig["toolBudget"]): AgentConfig => ({
@@ -25,6 +27,61 @@ const ctx = {
 };
 
 describe("async runner execution", () => {
+	it("rejects an explicitly requested model outside an enforced scope in the async single path", () => {
+		const requestedAgent = agent("worker");
+		const id = `scope-${Date.now()}`;
+		try {
+			assert.throws(() => executeAsyncSingle(id, {
+				agent: "worker",
+				task: "scope test",
+				agentConfig: requestedAgent,
+				ctx: {
+					pi: {} as never,
+					cwd: process.cwd(),
+					currentSessionId: "session-1",
+					modelScope: { enforce: true, allow: ["openai/*"] },
+				},
+				availableModels: [{ provider: "anthropic", id: "claude-test", fullId: "anthropic/claude-test" }],
+				modelOverride: "anthropic/claude-test",
+				artifactConfig: { ...DEFAULT_ARTIFACT_CONFIG, enabled: false },
+				shareEnabled: false,
+				maxSubagentDepth: 2,
+			}), /outside the configured subagent model scope/i);
+		} finally {
+			fs.rmSync(path.join(ASYNC_DIR, id), { recursive: true, force: true });
+		}
+	});
+
+	it("accepts an allowed model and leaves a non-enforcing scope advisory in the async single path", () => {
+		for (const [id, scope] of [
+			[`allowed-${Date.now()}`, { enforce: true, allow: ["openai/*"] }],
+			[`advisory-${Date.now()}`, { enforce: false, allow: ["openai/*"] }],
+		] as const) {
+			try {
+				const result = executeAsyncSingle(id, {
+					agent: "worker",
+					task: "scope test",
+					agentConfig: agent("worker"),
+					ctx: {
+						pi: {} as never,
+						cwd: path.join(process.cwd(), "missing-async-scope-test-cwd"),
+						currentSessionId: "session-1",
+						modelScope: scope,
+					},
+					availableModels: [{ provider: "openai", id: "gpt-test", fullId: "openai/gpt-test" }],
+					modelOverride: "openai/gpt-test",
+					artifactConfig: { ...DEFAULT_ARTIFACT_CONFIG, enabled: false },
+					shareEnabled: false,
+					maxSubagentDepth: 2,
+				});
+				assert.equal(result.isError, true, "invalid cwd should stop before spawning a runner");
+				assert.doesNotMatch(result.content[0]?.text ?? "", /outside the configured subagent model scope/i);
+			} finally {
+				fs.rmSync(path.join(ASYNC_DIR, id), { recursive: true, force: true });
+			}
+		}
+	});
+
 	it("places detached runner stdio logs in the async run directory", () => {
 		const asyncDir = path.join("tmp", "async-run");
 		assert.deepEqual(resolveAsyncRunnerLogPaths({ asyncDir }), {

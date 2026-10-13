@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { buildChildEnv } from "../../shared/child-env.ts";
+import { loadConfig } from "../../extension/config.ts";
 import type {
 	AcceptanceConfig,
 	AcceptanceEvidenceKind,
@@ -765,7 +767,7 @@ function isBlockedEnvVar(name: string): boolean {
  * process.env with command.env, blocking critical overrides.
  */
 function buildVerifyEnv(commandEnv: Record<string, string> | undefined): NodeJS.ProcessEnv {
-	const merged: NodeJS.ProcessEnv = { ...process.env };
+	const merged: NodeJS.ProcessEnv = buildChildEnv(process.env, {}, loadConfig().childEnv);
 	if (!commandEnv) return merged;
 	for (const key of Object.keys(commandEnv)) {
 		if (isBlockedEnvVar(key)) continue;

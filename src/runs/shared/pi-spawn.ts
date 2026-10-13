@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { buildChildEnv } from "../../shared/child-env.ts";
 import { fileURLToPath } from "node:url";
 
 export const PI_CODING_AGENT_PACKAGE = "@earendil-works/pi-coding-agent";
@@ -130,7 +131,7 @@ export function getPiSpawnCommand(
 	args: string[],
 	deps: PiSpawnDeps = {},
 ): PiSpawnCommand {
-	const env = deps.env ?? process.env;
+	const env = deps.env ?? buildChildEnv(process.env);
 	const piBinary = env[PI_SUBAGENT_PI_BINARY_ENV]?.trim();
 	if (piBinary) {
 		return { command: piBinary, args };

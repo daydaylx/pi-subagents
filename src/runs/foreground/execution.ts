@@ -73,6 +73,8 @@ import { appendTurnBudgetSystemPrompt, formatTurnBudgetOutput, initialTurnBudget
 import { initialToolBudgetState, toolBudgetState } from "../shared/tool-budget.ts";
 import { resolveTimeBudget } from "../shared/time-budget.ts";
 import { resolveWatchdogConfig } from "../../watchdog/settings.ts";
+import { buildChildEnv } from "../../shared/child-env.ts";
+import { loadConfig } from "../../extension/config.ts";
 import {
 	acceptChildWatchdogEvent,
 	childWatchdogIsActive,
@@ -356,7 +358,7 @@ async function runSingleAttempt(
 		};
 		return result;
 	}
-	const spawnEnv = { ...process.env, ...sharedEnv, ...getSubagentDepthEnv(options.maxSubagentDepth) };
+	const spawnEnv = buildChildEnv(process.env, { ...sharedEnv, ...getSubagentDepthEnv(options.maxSubagentDepth) }, loadConfig().childEnv);
 	let observedMutationAttempt = false;
 
 	const exitCode = await new Promise<number>((resolve) => {

@@ -171,7 +171,13 @@ export interface SubagentUiConfig {
   fleetViewPlacement?: WidgetPlacement;
 }
 
+export interface ChildEnvConfig {
+  deny?: string[];
+  allow?: string[];
+}
+
 export interface ExtensionConfig {
+  childEnv?: ChildEnvConfig;
   asyncByDefault?: boolean;
   /** Tool description variant registered for the parent-facing subagent tool. Defaults to full. */
   toolDescriptionMode?: ToolDescriptionMode;

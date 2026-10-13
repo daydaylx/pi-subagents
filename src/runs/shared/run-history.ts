@@ -38,6 +38,7 @@ export interface RunEntry {
 
 const ROTATE_READ_THRESHOLD = 1200;
 const ROTATE_KEEP = 1000;
+const ROTATE_WRITE_THRESHOLD_BYTES = 256 * 1024;
 
 function getHistoryPath(): string {
 	return path.join(getAgentDir(), "run-history.jsonl");
@@ -81,6 +82,16 @@ export function recordRun(
 		const historyPath = getHistoryPath();
 		fs.mkdirSync(path.dirname(historyPath), { recursive: true });
 		fs.appendFileSync(historyPath, `${JSON.stringify(entry)}\n`);
+		if (fs.statSync(historyPath).size > ROTATE_WRITE_THRESHOLD_BYTES) {
+			const lines = fs.readFileSync(historyPath, "utf-8").split("\n").filter(Boolean).slice(-ROTATE_KEEP);
+			const temporaryPath = `${historyPath}.${process.pid}.${Date.now()}.tmp`;
+			try {
+				fs.writeFileSync(temporaryPath, `${lines.join("\n")}\n`, "utf-8");
+				fs.renameSync(temporaryPath, historyPath);
+			} catch {
+				try { fs.unlinkSync(temporaryPath); } catch {}
+			}
+		}
 	} catch {
 		// Best-effort — never crash the execution flow for history recording
 	}

@@ -1,4 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
+import { buildChildEnv } from "../../shared/child-env.ts";
+import { loadConfig } from "../../extension/config.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -390,7 +392,7 @@ function runPiStreaming(
 ): Promise<RunPiStreamingResult> {
 	return new Promise((resolve) => {
 		const outputStream = fs.createWriteStream(outputFile, { flags: "w" });
-		const spawnEnv = { ...process.env, ...(env ?? {}), ...getSubagentDepthEnv(maxSubagentDepth) };
+		const spawnEnv = buildChildEnv(process.env, { ...(env ?? {}), ...getSubagentDepthEnv(maxSubagentDepth) }, loadConfig().childEnv);
 		const spawnSpec = getPiSpawnCommand(args, {
 			...(piPackageRoot ? { piPackageRoot } : {}),
 			...(piArgv1 ? { argv1: piArgv1 } : {}),

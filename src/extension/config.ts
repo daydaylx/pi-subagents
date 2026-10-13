@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ExtensionConfig } from "../shared/types.ts";
 import { getAgentDir } from "../shared/utils.ts";
+import { validateChildEnvConfig } from "../shared/child-env.ts";
 
 export function getConfigPath(): string {
 	return path.join(getAgentDir(), "extensions", "subagent", "config.json");
@@ -13,7 +14,9 @@ function readConfigForUpdate(configPath = getConfigPath()): ExtensionConfig {
 	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
 		throw new Error(`Subagent config at '${configPath}' must be a JSON object`);
 	}
-	return parsed as ExtensionConfig;
+	const config = parsed as ExtensionConfig;
+	if (config.childEnv !== undefined) config.childEnv = validateChildEnvConfig(config.childEnv);
+	return config;
 }
 
 export function saveConfig(config: ExtensionConfig, configPath = getConfigPath()): void {
@@ -35,5 +38,5 @@ export function loadConfig(): ExtensionConfig {
 	} catch (error) {
 		console.error(`Failed to load subagent config from '${configPath}':`, error);
 	}
-	return {};
+	return { toolSchemaMode: "harness" };
 }

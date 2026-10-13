@@ -13,6 +13,7 @@
 - Documented `contact_supervisor` structured interview requests in the default child bridge instructions.
 
 ### Fixed
+- Filter credential-like inherited environment variables from child processes while preserving provider credentials Pi reads from the environment (API keys, OAuth/bearer tokens) and engine-supplied values; enforce model scope for async single runs, rotate run history while recording, and fail closed to harness tool schemas on malformed config.
 - Dropped the watchdog review's provider `env` forwarding. Neither the resolved request auth nor the stream options carry `env` any more, so the plumbing was dead and its test asserted behaviour the runtime no longer had.
 - Hide lower-priority agent definitions from `subagent({ action: "list" })` when a higher-priority project or user agent shadows them. Thanks to Kylegl (@kylegl) for #415.
 - Resolve the real Pi CLI on Windows when pi-subagents runs inside an embedded SDK host instead of relaunching the host application's entry point. Thanks to Marc Kassubeck (@CompN3rd) for #413.

@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
+import { buildChildEnv } from "../shared/child-env.ts";
+import { loadConfig } from "../extension/config.ts";
 import type {
 	WatchdogLspConfig,
 	WatchdogLspDiagnostic,
@@ -450,7 +452,7 @@ async function collectWithTypeScriptLanguageServer(input: {
 	const child = spawn(input.command.command, input.command.args, {
 		cwd: input.root,
 		stdio: "pipe",
-		env: { ...process.env, NO_COLOR: "1" },
+		env: buildChildEnv(process.env, { NO_COLOR: "1" }, loadConfig().childEnv),
 		shell: process.platform === "win32" && /\.(cmd|bat)$/i.test(input.command.command),
 	});
 	const client = new JsonRpcLspClient(child);

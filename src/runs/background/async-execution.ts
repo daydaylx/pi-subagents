@@ -8,6 +8,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
+import { buildChildEnv } from "../../shared/child-env.ts";
+import { loadConfig } from "../../extension/config.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { AgentConfig } from "../../agents/agents.ts";
 import { applyThinkingSuffix } from "../shared/pi-args.ts";
@@ -314,10 +316,9 @@ function spawnRunner(cfg: object, suffix: string, cwd: string): { pid?: number; 
 			detached: true,
 			stdio: ["ignore", stdoutFd ?? "ignore", stderrFd ?? "ignore"],
 			windowsHide: true,
-			env: {
-				...process.env,
+			env: buildChildEnv(process.env, {
 				...(piPackageRoot ? { [PI_CODING_AGENT_PACKAGE_ROOT_ENV]: piPackageRoot } : {}),
-			},
+			}, loadConfig().childEnv),
 		});
 		closeFd(stdoutFd);
 		closeFd(stderrFd);
@@ -915,6 +916,7 @@ export function executeAsyncSingle(
 		ctx.currentModel,
 		availableModels,
 		ctx.currentModelProvider,
+		{ scope: ctx.modelScope, source: params.modelOverride ? "explicit" : "inherited" },
 	);
 	const effectiveThinking = params.thinkingOverride ?? agentConfig.thinking;
 	const model = applyThinkingSuffix(primaryModel, effectiveThinking, params.thinkingOverride !== undefined);
