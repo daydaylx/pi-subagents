@@ -23,7 +23,6 @@ import type { NestedRunSummary } from "./async.ts";
 import type {
   AgentProgress,
   ProgressSummary,
-  ChildWatchdogProgress,
   ToolCallSummary,
 } from "./progress.ts";
 
@@ -241,7 +240,6 @@ export interface SingleResult {
   transcriptPath?: string;
   transcriptError?: string;
   children?: NestedRunSummary[];
-  watchdog?: ChildWatchdogProgress;
 }
 
 export interface Details {

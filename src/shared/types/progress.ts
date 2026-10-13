@@ -4,15 +4,6 @@
 
 import type { ActivityState } from "./basic.ts";
 
-export interface ChildWatchdogProgress {
-  phase: "idle" | "reviewing" | "autofollow" | "settling" | "stale" | "failed";
-  seq: number;
-  lastUpdate: number;
-  followUpPending: boolean;
-  reason?: string;
-  timedOut?: boolean;
-}
-
 export interface AgentProgress {
   index: number;
   agent: string;
@@ -33,7 +24,6 @@ export interface AgentProgress {
   durationMs: number;
   error?: string;
   failedTool?: string;
-  watchdog?: ChildWatchdogProgress;
 }
 
 export interface ToolCallSummary {

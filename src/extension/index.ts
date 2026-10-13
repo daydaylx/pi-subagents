@@ -32,10 +32,8 @@ import { createFleetDockWiring } from "../runs/background/fleet-dock-wiring.ts";
 import { createScheduledRunManager } from "../runs/background/scheduled-runs.ts";
 import { registerSlashCommands } from "../slash/slash-commands.ts";
 import { registerPromptTemplateDelegationBridge } from "../slash/prompt-template-bridge.ts";
-import { registerMainWatchdog } from "../watchdog/register-main.ts";
 import { registerSlashSubagentBridge } from "../slash/slash-bridge.ts";
 import { createNativeSupervisorChannel } from "../intercom/native-supervisor-channel.ts";
-import { registerSubagentRpcBridge } from "./rpc.ts";
 import { clearSlashSnapshots, getSlashRenderableSnapshot, resolveSlashMessageDetails, restoreSlashFinalSnapshots, type SlashMessageDetails } from "../slash/slash-live-state.ts";
 import { inspectSubagentStatus } from "../runs/background/run-status.ts";
 import { resolveWaitToolConfig, waitForSubagents } from "../runs/background/wait.ts";
@@ -290,7 +288,6 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 	const fleetDockWiring = createFleetDockWiring(state, config);
 
 	const supervisorChannel = createNativeSupervisorChannel(pi, state);
-	const mainWatchdog = registerMainWatchdog(pi);
 	const { startResultWatcher, primeExistingResults, stopResultWatcher } = createResultWatcher(
 		pi,
 		state,
@@ -301,7 +298,6 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 	primeExistingResults();
 
 	const runtimeCleanup = () => {
-		mainWatchdog.dispose();
 		stopResultWatcher();
 		scheduledRunManager.stop();
 		supervisorChannel.dispose();
@@ -338,7 +334,6 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		config,
 		asyncByDefault,
 		handleScheduledRunAction: (params, ctx) => scheduledRunManager.handleToolCall(params, ctx),
-		watchdog: mainWatchdog,
 		tempArtifactsDir,
 		getSubagentSessionRoot,
 		expandTilde,
@@ -448,12 +443,6 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 				ctx,
 			);
 		},
-	});
-
-	const rpcBridge = registerSubagentRpcBridge({
-		events: pi.events,
-		getContext: () => state.lastUiContext,
-		execute: (id, params, signal, onUpdate, ctx) => executor.execute(id, params, signal, onUpdate, ctx),
 	});
 
 	type RenderableSubagentArgs = {

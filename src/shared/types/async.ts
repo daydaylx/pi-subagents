@@ -17,7 +17,6 @@ import type {
   SubagentResultStatus,
   OutputMode,
 } from "./basic.ts";
-import type { ChildWatchdogProgress } from "./progress.ts";
 import type {
   ModelAttempt,
   AcceptanceLedger,
@@ -66,7 +65,6 @@ export interface NestedStepSummary {
   startedAt?: number;
   endedAt?: number;
   error?: string;
-  watchdog?: ChildWatchdogProgress;
   timedOut?: boolean;
   stopped?: boolean;
   turnBudget?: TurnBudgetState;
@@ -235,7 +233,6 @@ export interface AsyncStatus {
     structuredOutputPath?: string;
     structuredOutputSchemaPath?: string;
     acceptance?: AcceptanceLedger;
-    watchdog?: ChildWatchdogProgress;
   }>;
   sessionDir?: string;
   outputFile?: string;

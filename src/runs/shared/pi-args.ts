@@ -8,7 +8,6 @@ import { STRUCTURED_OUTPUT_CAPTURE_ENV, STRUCTURED_OUTPUT_SCHEMA_ENV } from "./s
 import { TEMP_ROOT_DIR, type JsonSchemaObject, type ResolvedToolBudget } from "../../shared/types.ts";
 import { TOOL_BUDGET_ENV, encodeToolBudgetEnv } from "./tool-budget.ts";
 import { TIME_BUDGET_ENV, encodeTimeBudgetEnv, type TimeBudget } from "./time-budget.ts";
-import { CHILD_WATCHDOG_CONFIG_ENV, encodeChildWatchdogConfig, type ChildWatchdogConfig } from "../../watchdog/child-status.ts";
 
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"];
 const TASK_ARG_LIMIT = 8000;
@@ -74,7 +73,6 @@ interface BuildPiArgsInput {
 	};
 	toolBudget?: ResolvedToolBudget;
 	timeBudget?: TimeBudget;
-	childWatchdog?: ChildWatchdogConfig;
 }
 
 interface BuildPiArgsResult {
@@ -259,8 +257,6 @@ export function buildPiArgs(input: BuildPiArgsInput): BuildPiArgsResult {
 	if (encodedToolBudget) env[TOOL_BUDGET_ENV] = encodedToolBudget;
 	const encodedTimeBudget = encodeTimeBudgetEnv(input.timeBudget);
 	if (encodedTimeBudget) env[TIME_BUDGET_ENV] = encodedTimeBudget;
-	const encodedChildWatchdog = encodeChildWatchdogConfig(input.childWatchdog);
-	if (encodedChildWatchdog) env[CHILD_WATCHDOG_CONFIG_ENV] = encodedChildWatchdog;
 
 	env[SUBAGENT_PARENT_SESSION_ENV] = input.parentSessionId ?? process.env[SUBAGENT_PARENT_SESSION_ENV] ?? "";
 

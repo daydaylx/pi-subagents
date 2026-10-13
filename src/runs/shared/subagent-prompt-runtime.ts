@@ -8,8 +8,6 @@ import { STRUCTURED_OUTPUT_CAPTURE_ENV, STRUCTURED_OUTPUT_SCHEMA_ENV, validateSt
 import { TOOL_BUDGET_ENV, decodeToolBudgetEnv, shouldBlockToolForBudget, tokenBudgetBlockedMessage, tokensFromUsage, toolBudgetBlockedMessage, toolBudgetSoftNudge } from "./tool-budget.ts";
 import { TIME_BUDGET_ENV, decodeTimeBudgetEnv, shouldNudgeForTimeBudget, timeBudgetSoftNudge } from "./time-budget.ts";
 import type { JsonSchemaObject, ResolvedToolBudget } from "../../shared/types.ts";
-import { registerChildWatchdog } from "../../watchdog/register-child.ts";
-import { SUBAGENT_WATCHDOG_WARNING_TYPE } from "../../watchdog/types.ts";
 
 const SUBAGENT_INHERIT_PROJECT_CONTEXT_ENV = "PI_SUBAGENT_INHERIT_PROJECT_CONTEXT";
 const SUBAGENT_INHERIT_SKILLS_ENV = "PI_SUBAGENT_INHERIT_SKILLS";
@@ -118,7 +116,6 @@ export function rewriteSubagentPrompt(
 function isParentOnlySubagentMessage(message: unknown): boolean {
 	const m = message as { role?: string; customType?: string };
 	if (m?.role !== "custom" || typeof m.customType !== "string") return false;
-	if (m.customType === SUBAGENT_WATCHDOG_WARNING_TYPE) return true;
 	return PARENT_ONLY_CUSTOM_MESSAGE_TYPES.has(m.customType);
 }
 
@@ -302,7 +299,6 @@ export default function registerSubagentPromptRuntime(pi: ExtensionAPI): void {
 	registerSteeringInbox(pi);
 	registerToolBudget(pi, decodeToolBudgetEnv(process.env[TOOL_BUDGET_ENV]));
 	registerTimeBudget(pi, decodeTimeBudgetEnv(process.env[TIME_BUDGET_ENV]));
-	registerChildWatchdog(pi);
 	let nativeSupervisorClientRegistered = false;
 	let nativeSupervisorFallbackRegistered = false;
 	const registerNativeSupervisorClientOnce = (): void => {
